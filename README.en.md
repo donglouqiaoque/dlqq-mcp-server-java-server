@@ -792,5 +792,5 @@ Gitignore-style syntax (`*.log`, `build/`, `/config.txt`, `!important.log`, `**/
 
 ## License
 
-Apache License 2.0.
+MIT License. See [LICENSE](LICENSE).
 
