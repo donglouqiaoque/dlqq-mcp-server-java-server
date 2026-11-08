@@ -710,8 +710,8 @@ public class AITools {
                 String replaceText = (String) arguments.get("replace_text");
                 String mode = (String) arguments.getOrDefault("mode", "text");
                 String charset = (String) arguments.get("charset");
-                Integer startLine = (Integer) arguments.get("start_line");
-                Integer endLine = (Integer) arguments.get("end_line");
+                Integer startLine = parseInteger(arguments.get("start_line"), null);
+                Integer endLine = parseInteger(arguments.get("end_line"), null);
 
                 if (filePath == null || filePath.trim().isEmpty()) {
                     return errorResult("文件路径不能为空");
@@ -791,8 +791,8 @@ public class AITools {
                 String searchText = (String) arguments.get("search_text");
                 String mode = (String) arguments.getOrDefault("mode", "text");
                 String charset = (String) arguments.get("charset");
-                Integer startLine = (Integer) arguments.get("start_line");
-                Integer endLine = (Integer) arguments.get("end_line");
+                Integer startLine = parseInteger(arguments.get("start_line"), null);
+                Integer endLine = parseInteger(arguments.get("end_line"), null);
 
                 if (filePath == null || filePath.trim().isEmpty()) {
                     return errorResult("文件路径不能为空");
@@ -875,7 +875,7 @@ public class AITools {
                 String mode = (String) arguments.getOrDefault("mode", "text");
                 String charset = (String) arguments.get("charset");
                 Object fileExtensionsObj = arguments.get("file_extensions");
-                Integer maxFiles = (Integer) arguments.get("max_files");
+                Integer maxFiles = parseInteger(arguments.get("max_files"), null);
 
                 if (dirPath == null || dirPath.trim().isEmpty()) {
                     return errorResult("目录路径不能为空");

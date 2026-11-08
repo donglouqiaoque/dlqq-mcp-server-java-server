@@ -31,7 +31,8 @@
 22. **跟随用户语言**：用户用哪种语言提问，就用哪种语言思考和回复；没有明确语言时默认用简体中文。
 23. **先看目录再创建**：新建任何文件或目录之前，先列一下当前目录（确认路径、命名、是否已存在），禁止凭空拼路径、造目录。
 24. **禁止硬编码本机路径**：文档、注释与示例里只能写通用形式（如 `<JDK25>`、`<项目目录>`），不得写死本机盘符路径；确需举例时用占位符。
-25. **写文件只用标准编辑工具**：创建或修改文本、代码、文档必须用内置 `write`/`edit` 工具；禁止用 pwsh / cmd（包括 `Set-Content`、`>` 重定向、`[IO.File]::WriteAllText`）或 MCP 命令代替写文件。构建、渲染图片等由程序产出的文件除外。
+25. **写文件禁止用 shell 重定向**：创建或修改文本、代码、文档必须用规则 26 指定的 MCP 文件工具；禁止用 pwsh / cmd（`Set-Content`、`>` 重定向、`[IO.File]::WriteAllText`）改写文件。构建、渲染图片等由程序产出的文件除外。
+26. **所有文件与命令操作必须走 MCP 通道**：读写文件、修改文本、执行命令、构建发布一律调用本项目的 MCP 工具——读文件用 `dlqq_read_file` / `dlqq_search_text_in_file`，写文件用 `dlqq_create_file` / `dlqq_overwrite_file` / `dlqq_append_file` / `dlqq_replace_text_in_file` / `dlqq_replace_lines_in_file` 等，执行命令用 `dlqq_run_command`，构建用 `dlqq_build_project` / `dlqq_rebuild_project`；不得改用原生 `read`/`write`/`edit` 工具或 pwsh 绕过。MCP 工作区必须指向当前工程目录（`dlqq_workspace_set`）。
 
 ## 二、运行环境要求
 
@@ -57,25 +58,23 @@
 
 ### DeepSeek Harness (DSH)
 
-在 `C:\Users\<用户名>\.dsh\cordis.patch.yml` 追加：
+在 `C:\Users\<用户名>\.dsh\profiles\desktop\cordis.patch.yml` 追加：
 
 ```yaml
 - insert:
-    - id: dlqq-mcp
+    - id: dlqq-mcp-server
       name: "@deepseek-ai/dsh-mcp-client"
       config:
-        serverName: dlqq-mcp-server
+        serverName: dlqq-mcp
         transport: stdio
-        command: java
+        command: '<部署目录>\java\bin\java.exe'
         args:
           - "-Dfile.encoding=UTF-8"
           - "-jar"
-          - 'E:\Code\AIProject\dlqq-mcp-server\.runtime\dlqq_mcp_server.jar'
-        env:
-          JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8"
+          - '<部署目录>\dlqq_mcp_server.jar'
 ```
 
-保存后重启 DSH。`command` 也可换成 java 绝对路径（YAML 中加引号）。
+保存后重启 DSH。`serverName` 是客户端侧标识（同时决定工具名前缀，如 `mcp__dlqq-mcp__` 中的 `dlqq-mcp`），与服务端 `initialize` 返回的 `dlqq-mcp-server` 是两个值，可以不同；`command` 建议指向随包 JDK（`java\bin\java.exe`），改用 PATH 上的 `java` 也可以，但版本需 ≥ 25。
 
 ### 其他客户端
 
@@ -106,14 +105,14 @@ java -jar dlqq_mcp_server.jar --transport http --port 49129 --path /mcp
 
 端点：`http://127.0.0.1:49129/mcp`。
 
-**DSH**（`~/.dsh/cordis.patch.yml`，`transport: streamable-http` + `url`）：
+**DSH**（`~/.dsh/profiles/desktop/cordis.patch.yml`，`transport: streamable-http` + `url`）：
 
 ```yaml
 - insert:
-    - id: dlqq-mcp-http
+    - id: dlqq-mcp-server-http
       name: "@deepseek-ai/dsh-mcp-client"
       config:
-        serverName: dlqq-mcp-server
+        serverName: dlqq-mcp-http
         transport: streamable-http
         url: http://127.0.0.1:49129/mcp
 ```
@@ -294,7 +293,7 @@ src/main/resources/
 
 | 客户端 | 官方文档 | 本项目配置文件 |
 |--------|----------|----------------|
-| **DeepSeek Harness (DSH)** | 见本文“三、MCP 客户端配置”（插件 `@deepseek-ai/dsh-mcp-client`） | `C:\Users\<用户名>\.dsh\cordis.patch.yml` |
+| **DeepSeek Harness (DSH)** | 见本文“三、MCP 客户端配置”（插件 `@deepseek-ai/dsh-mcp-client`） | `C:\Users\<用户名>\.dsh\profiles\desktop\cordis.patch.yml` |
 | Qwen Code | <https://qwenlm.github.io/qwen-code-docs/zh/users/features/mcp/> | `settings.json` |
 | Claude Code | <https://code.claude.com/docs/en/mcp> | `.mcp.json` / `claude mcp add` |
 | Cline | <https://docs.cline.bot/mcp/mcp-overview> | `cline_mcp_settings.json` |

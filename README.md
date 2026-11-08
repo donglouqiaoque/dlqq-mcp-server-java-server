@@ -2,6 +2,8 @@
 
 一个 Java 编写的 **MCP 服务器**（Model Context Protocol），为各类 AI Agent 工具（DeepSeek Harness、Qwen Code、Claude Code、Cursor、Cline 等）提供本地工具能力。
 
+**项目沿革**：本项目最初名为 `donglouqiaoque-ai-tools`，后更名为 `dlqq-ai-mcp-server`，现为 `dlqq-mcp-server`。原仓库已删除并重建，当前仓库为新仓库，提交历史从零开始；代码实现与架构保持不变，仅开源许可证由 Apache 2.0 调整为 MIT。
+
 > English version: [README.en.md](README.en.md)
 
 ## 功能特性
@@ -551,27 +553,25 @@ mvn clean package -DskipTests
 
 #### ① DeepSeek Harness (DSH)
 
-DSH 在用户目录的 `cordis.patch.yml`（Windows：`C:\Users\<用户名>\.dsh\cordis.patch.yml`）里注册 MCP 客户端插件，追加一个 `- insert:` 条目即可：
+DSH 在 profile 目录的 `cordis.patch.yml`（Windows：`C:\Users\<用户名>\.dsh\profiles\desktop\cordis.patch.yml`）里注册 MCP 客户端插件，追加一个 `- insert:` 条目即可：
 
 ```yaml
 - insert:
-    - id: dlqq-mcp
+    - id: dlqq-mcp-server
       name: "@deepseek-ai/dsh-mcp-client"
       config:
-        serverName: dlqq-mcp-server
+        serverName: dlqq-mcp
         transport: stdio
-        command: java
+        command: '<部署目录>\java\bin\java.exe'
         args:
           - "-Dfile.encoding=UTF-8"
           - "-jar"
-          - 'E:\Code\AIProject\dlqq-mcp-server\debug\dlqq_mcp_server.jar'
-        env:
-          JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8"
+          - '<部署目录>\dlqq_mcp_server.jar'
 ```
 
 说明：
-- `id` 在文件内唯一即可；`serverName` 就是会话中显示的服务器名。
-- `command: java` 要求 java 在 PATH 中；也可以写绝对路径并加引号，例如 `command: 'D:\Soft\Java\jdk-25\bin\java.exe'`。
+- `id` 在文件内唯一即可；`serverName` 是客户端侧标识，会作为工具名前缀（如 `mcp__dlqq-mcp__` 里的 `dlqq-mcp`），与服务端 `initialize` 返回的 `dlqq-mcp-server` 是两个值，可以不同。
+- `command` 建议指向随包 JDK：`<部署目录>\java\bin\java.exe`；改用 PATH 上的 `java` 也可以，但版本需 ≥ 25。
 - 保存后重启 DeepSeek Harness，新会话即可通过 `tools/list` 看到全部 `dlqq_*` 工具。
 
 #### ② Qwen Code
@@ -697,14 +697,14 @@ java -jar dlqq_mcp_server.jar --transport http --port 49129 --path /mcp
 
 端点：`http://127.0.0.1:49129/mcp`（端口/路径按启动参数调整；服务端无鉴权、无会话状态，各客户端直接填 URL 即可）。
 
-**DeepSeek Harness (DSH)** — `~/.dsh/cordis.patch.yml`（`transport: streamable-http` + `url`）：
+**DeepSeek Harness (DSH)** — `~/.dsh/profiles/desktop/cordis.patch.yml`（`transport: streamable-http` + `url`）：
 
 ```yaml
 - insert:
-    - id: dlqq-mcp-http
+    - id: dlqq-mcp-server-http
       name: "@deepseek-ai/dsh-mcp-client"
       config:
-        serverName: dlqq-mcp-server
+        serverName: dlqq-mcp-http
         transport: streamable-http
         url: http://127.0.0.1:49129/mcp
 ```

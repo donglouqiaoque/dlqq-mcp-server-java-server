@@ -31,7 +31,8 @@
 22. **Follow the user's language**: think and reply in the language the user writes in; default to Simplified Chinese when no language is specified.
 23. **Look before you create**: list the current directory before creating any file or directory (confirm the path, the name and whether it already exists). Never invent paths or directories.
 24. **No hard-coded local paths**: documentation, comments and examples must use generic forms such as `<JDK25>` or `<project dir>`; never embed a local drive-letter path. Use placeholders when an example is needed.
-25. **Write files only with the standard editing tools**: create or modify text, code and documentation with the built-in `write`/`edit` tools only. Do not use pwsh / cmd (`Set-Content`, `>` redirection, `[IO.File]::WriteAllText`) or MCP commands as a substitute for writing files. Files produced by programs (build output, rendered images, ...) are exempt.
+25. **Never write files through shell redirection**: create or modify text, code and docs with the MCP file tools required by rule 26. Never use pwsh / cmd (`Set-Content`, `>` redirection, `[IO.File]::WriteAllText`). Files produced by programs (build output, rendered images, ...) are exempt.
+26. **All file and command operations must go through the MCP channel**: reading/writing files, editing text, running commands and building must always call this project's MCP tools — `dlqq_read_file` / `dlqq_search_text_in_file` to read, `dlqq_create_file` / `dlqq_overwrite_file` / `dlqq_append_file` / `dlqq_replace_text_in_file` / `dlqq_replace_lines_in_file` to write, `dlqq_run_command` to run commands, `dlqq_build_project` / `dlqq_rebuild_project` to build. Do not fall back to the native `read`/`write`/`edit` tools or pwsh. The MCP workspace must point at the current project directory (`dlqq_workspace_set`).
 
 ## 2. Runtime requirements
 
@@ -56,25 +57,23 @@ This is a standard **MCP Server** supporting **stdio** (default) and **Streamabl
 
 ### DeepSeek Harness (DSH)
 
-Append to `C:\Users\<user>\.dsh\cordis.patch.yml`:
+Append to `C:\Users\<user>\.dsh\profiles\desktop\cordis.patch.yml`:
 
 ```yaml
 - insert:
-    - id: dlqq-mcp
+    - id: dlqq-mcp-server
       name: "@deepseek-ai/dsh-mcp-client"
       config:
-        serverName: dlqq-mcp-server
+        serverName: dlqq-mcp
         transport: stdio
-        command: java
+        command: '<deploy dir>\java\bin\java.exe'
         args:
           - "-Dfile.encoding=UTF-8"
           - "-jar"
-          - 'E:\Code\AIProject\dlqq-mcp-server\.runtime\dlqq_mcp_server.jar'
-        env:
-          JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8"
+          - '<deploy dir>\dlqq_mcp_server.jar'
 ```
 
-Restart DSH after saving. `command` may also be an absolute path to java (quote it in YAML).
+Restart DSH after saving. `serverName` is the client-side label (it also prefixes tool names, e.g. `dlqq-mcp` in `mcp__dlqq-mcp__`) and is separate from the `dlqq-mcp-server` name returned by `initialize`; `command` should point at the bundled JDK (`java\bin\java.exe`), or at `java` from PATH with version ≥ 25.
 
 ### Other clients
 
@@ -105,14 +104,14 @@ java -jar dlqq_mcp_server.jar --transport http --port 49129 --path /mcp
 
 Endpoint: `http://127.0.0.1:49129/mcp`.
 
-**DSH** (`~/.dsh/cordis.patch.yml`, `transport: streamable-http` + `url`):
+**DSH** (`~/.dsh/profiles/desktop/cordis.patch.yml`, `transport: streamable-http` + `url`):
 
 ```yaml
 - insert:
-    - id: dlqq-mcp-http
+    - id: dlqq-mcp-server-http
       name: "@deepseek-ai/dsh-mcp-client"
       config:
-        serverName: dlqq-mcp-server
+        serverName: dlqq-mcp-http
         transport: streamable-http
         url: http://127.0.0.1:49129/mcp
 ```
@@ -293,7 +292,7 @@ Scope: strictly enforced inside the project; outside the project a JFrame asks t
 
 | Client | Official docs | Config file in this project |
 |--------|---------------|-----------------------------|
-| **DeepSeek Harness (DSH)** | see "3. MCP client configuration" above (plugin `@deepseek-ai/dsh-mcp-client`) | `C:\Users\<user>\.dsh\cordis.patch.yml` |
+| **DeepSeek Harness (DSH)** | see "3. MCP client configuration" above (plugin `@deepseek-ai/dsh-mcp-client`) | `C:\Users\<user>\.dsh\profiles\desktop\cordis.patch.yml` |
 | Qwen Code | <https://qwenlm.github.io/qwen-code-docs/zh/users/features/mcp/> | `settings.json` |
 | Claude Code | <https://code.claude.com/docs/en/mcp> | `.mcp.json` / `claude mcp add` |
 | Cline | <https://docs.cline.bot/mcp/mcp-overview> | `cline_mcp_settings.json` |

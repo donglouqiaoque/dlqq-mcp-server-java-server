@@ -7,6 +7,8 @@ A **Model Context Protocol (MCP) server** written in Java. It provides local too
 - **Runtime**: Java 25+ (**full JRE required**, see below)
 - **JAR name**: `dlqq_mcp_server.jar`
 
+**Project history**: this project was originally `donglouqiaoque-ai-tools`, later renamed to `dlqq-ai-mcp-server`, and is now `dlqq-mcp-server`. The previous repository was deleted and recreated, so the current one is a new repository whose commit history starts from scratch; the implementation and architecture are unchanged, and only the license changed from Apache 2.0 to MIT.
+
 > The Chinese README ([README.md](README.md)) is the reference document; this file mirrors its structure and tool detail in English.
 
 ## Features
@@ -121,38 +123,36 @@ Port handling is implemented inside Java: an occupied port asks for a new one at
 
 ## Connect an AI agent
 
-The server is a standard MCP server (JSON-RPC 2.0) and is not tied to a client. Examples below use a Debug JAR path — replace it with your real path.
+The server is a standard MCP server (JSON-RPC 2.0) and is not tied to a client. Examples below use `<deploy dir>` as a placeholder — replace it with your real deployment directory.
 
 ### DeepSeek Harness (DSH)
 
-File: `C:\Users\<you>\.dsh\cordis.patch.yml`.
+File: `C:\Users\<you>\.dsh\profiles\desktop\cordis.patch.yml`.
 
 stdio:
 
 ```yaml
 - insert:
-    - id: dlqq-mcp
+    - id: dlqq-mcp-server
       name: "@deepseek-ai/dsh-mcp-client"
       config:
-        serverName: dlqq-mcp-server
+        serverName: dlqq-mcp
         transport: stdio
-        command: java
+        command: '<deploy dir>\java\bin\java.exe'
         args:
           - "-Dfile.encoding=UTF-8"
           - "-jar"
-          - 'E:\Code\AIProject\dlqq-mcp-server\debug\dlqq_mcp_server.jar'
-        env:
-          JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8"
+          - '<deploy dir>\dlqq_mcp_server.jar'
 ```
 
 Streamable HTTP:
 
 ```yaml
 - insert:
-    - id: dlqq-mcp-http
+    - id: dlqq-mcp-server-http
       name: "@deepseek-ai/dsh-mcp-client"
       config:
-        serverName: dlqq-mcp-server
+        serverName: dlqq-mcp-http
         transport: streamable-http
         url: http://127.0.0.1:49129/mcp
 ```
