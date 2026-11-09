@@ -24,7 +24,7 @@
 
 ## 工具列表
 
-本MCP服务器提供 **167** 个工具（154 个常规工具 + 13 个 `dlqq_set_*_script` 脚本路径设置工具）。
+本MCP服务器提供 **169** 个工具（156 个常规工具 + 13 个 `dlqq_set_*_script` 脚本路径设置工具）。
 > 说明：分组标题中的序号为历史遗留编号，实际工具数以各分组表格为准。
 
 产物 JAR 名为 **`dlqq_mcp_server.jar`**。
@@ -227,13 +227,15 @@
 
 | 工具名称 | 描述 |
 |---------|------|
-| `dlqq_run_command` | 执行命令行指令（需要用户审批），支持设置工作目录、超时时间，以及 `no_wait`（后台启动、立即返回，不等待命令结束） |
+| `dlqq_run_command` | 通过 **cmd.exe /c** 执行命令行指令（需要用户审批），支持设置工作目录、超时时间，以及 `no_wait`（后台启动、立即返回，不等待命令结束） |
+| `dlqq_run_powershell` | 通过 **powershell.exe**（Windows PowerShell 5.1）执行脚本（需要用户审批），参数与 `dlqq_run_command` 相同 |
+| `dlqq_run_pwsh` | 通过 **pwsh.exe**（PowerShell 7+）执行脚本（需要用户审批），参数与 `dlqq_run_command` 相同 |
 
 **说明**：
 - **执行前必须通过 JFrame 弹窗获得用户确认**
 - 支持设置工作目录，命令将在指定目录下执行
 - 支持设置超时时间（1-600秒，默认60秒）
-- Windows 使用 `cmd /c`，Linux/Mac 使用 `sh -c`
+- 三个工具分别通过 `cmd /c`、`powershell.exe`、`pwsh.exe` 执行（Linux/Mac 上 `dlqq_run_command` 用 `sh -c`，两个 PowerShell 工具用 `pwsh`）
 - 返回命令的输出内容和退出码
 
 **示例**：

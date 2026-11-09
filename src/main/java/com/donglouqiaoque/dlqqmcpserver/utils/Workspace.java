@@ -5,6 +5,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.attribute.DosFileAttributeView;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -110,9 +111,53 @@ public final class Workspace {
         reloadPermission();
     }
 
+    /** 已经确保过 .dlqq/.gitignore 的工作区（避免每次 getRoot 都做磁盘检查） */
+    private static String ensuredDlqqRoot;
+
     /** 当前工作区根目录（绝对路径）。 */
     public static Path getRoot() {
+        ensureDlqqMetadata();
         return root;
+    }
+
+    /**
+     * 确保工作区下的 .dlqq 目录存在并带有 .gitignore（内容为 *，即忽略该目录全部内容）。
+     *
+     * <p>放在 getRoot() 里统一兜底：无论 .dlqq 是由日志初始化、缓存目录、
+     * 设置文件还是后台程序目录首次创建，只要访问过工作区，就一定会补齐
+     * .gitignore，避免日志/缓存被误提交到 git。</p>
+     */
+    private static void ensureDlqqMetadata() {
+        Path base = root;
+        if (base == null) {
+            return;
+        }
+        String key = base.toAbsolutePath().toString();
+        if (key.equals(ensuredDlqqRoot)) {
+            return;
+        }
+        try {
+            Path dlqqDir = base.resolve(".dlqq");
+            if (!Files.isDirectory(dlqqDir)) {
+                Files.createDirectories(dlqqDir);
+            }
+            Path gitignore = dlqqDir.resolve(".gitignore");
+            if (!Files.exists(gitignore)) {
+                Files.writeString(gitignore, "*\n", StandardCharsets.UTF_8);
+            }
+            // Windows 下把 .dlqq 设为隐藏目录（资源管理器默认不可见，避免误提交/误删）
+            try {
+                DosFileAttributeView dosView = Files.getFileAttributeView(dlqqDir, DosFileAttributeView.class);
+                if (dosView != null) {
+                    dosView.setHidden(true);
+                }
+            } catch (Exception ignored) {
+                // 非 Windows 平台或文件系统不支持时忽略
+            }
+            ensuredDlqqRoot = key;
+        } catch (Exception ignored) {
+            // 只读工作区或权限不足时忽略，不影响主流程
+        }
     }
 
     /** 当前工作区来源说明。 */

@@ -193,9 +193,19 @@ def main():
             print((r.stderr or r.stdout or "").strip()[-1200:])
             return 1
 
-        print("[pip] 安装 bleak + ttkbootstrap + pillow ...")
+    if not a.no_pip:
+        print("[pip] ensurepip ...")
+        r = run(build_py, ["-s", "-m", "ensurepip", "--upgrade"])
+        if r.returncode != 0:
+            print("[错误] ensurepip 失败：")
+            print((r.stderr or r.stdout or "").strip()[-1200:])
+            return 1
+
+        # 依赖固定版本，保证不同时间重建得到同样的结果
+        pkgs = ["bleak==3.0.2", "ttkbootstrap==2.2.6", "pillow==13.0.0"]
+        print("[pip] 安装 " + ", ".join(pkgs) + " ...")
         pip_args = ["-s", "-m", "pip", "install", "--no-warn-script-location",
-                    "--disable-pip-version-check", "bleak", "ttkbootstrap", "pillow"]
+                    "--disable-pip-version-check"] + pkgs
         if a.wheels:
             wheels = a.wheels if os.path.isabs(a.wheels) else os.path.join(ROOT, a.wheels)
             if not os.path.isdir(wheels):
@@ -203,7 +213,7 @@ def main():
                 return 1
             pip_args = ["-s", "-m", "pip", "install", "--no-warn-script-location",
                         "--disable-pip-version-check", "--no-index",
-                        "--find-links", wheels, "bleak", "ttkbootstrap", "pillow"]
+                        "--find-links", wheels] + pkgs
         r = run(build_py, pip_args, timeout=1800)
         if r.returncode != 0:
             print("[错误] pip 安装失败：")
@@ -223,13 +233,24 @@ def main():
     r = run(build_py, ["-s", "-P", "-c", "import sys;print(sys.version.split()[0])"])
     out_ver = (r.stdout or "").strip() or ver
 
+    # 重新统计最终体积：复制阶段的 done/total 不含 pip 装进 site-packages 的包
+    final_files = 0
+    final_size = 0
+    for dirpath, _, filenames in os.walk(build):
+        for fn in filenames:
+            final_files += 1
+            try:
+                final_size += os.path.getsize(os.path.join(dirpath, fn))
+            except OSError:
+                pass
+
     stamp = time.strftime("%Y-%m-%d %H:%M:%S")
     with open(os.path.join(build, "VERSION.txt"), "w", encoding="utf-8", newline="\n") as f:
         f.write(f"Python {out_ver}\n")
         f.write(f"built {stamp}\n")
-        f.write(f"files {done}, size {total / 1048576:.1f} MB\n")
-        f.write(f"source {src}\n")
-        f.write("packages bleak, ttkbootstrap, pillow\n" if not a.no_pip else "packages none\n")
+        f.write(f"files {final_files}, size {final_size / 1048576:.1f} MB\n")
+        f.write(f"source {os.path.basename(src)}\n")
+        f.write(("packages " + ", ".join(pkgs) + "\n") if not a.no_pip else "packages none\n")
 
     # 许可文件（随包分发需要）：CPython LICENSE + Tcl/Tk license.terms
     lic_dir = os.path.join(build, "licenses")
@@ -247,8 +268,32 @@ def main():
                     tcl_licenses.append(os.path.join(root, n))
     for i, lp in enumerate(tcl_licenses, 1):
         shutil.copy2(lp, os.path.join(lic_dir, f"TCL-TK-license-{i}.terms"))
+
+    # pip 包的许可证：从各自 dist-info 目录里集中复制一份，随包分发
+    # 注意：dist-info 下的 licenses 可能是目录，必须递归且跳过非文件项
+    pkg_lic_count = 0
+    site_packages = os.path.join(build, "Lib", "site-packages")
+    if os.path.isdir(site_packages):
+        for name in sorted(os.listdir(site_packages)):
+            if not name.lower().endswith(".dist-info"):
+                continue
+            info_dir = os.path.join(site_packages, name)
+            pkg = name[:-len(".dist-info")].split("-")[0]
+            copied = set()
+            for root, _, filenames in os.walk(info_dir):
+                in_lic_dir = os.path.basename(root).lower() in ("licenses", "license")
+                for fn in sorted(filenames):
+                    low = fn.lower()
+                    if not (in_lic_dir or low.startswith("license") or low.startswith("copying")):
+                        continue
+                    if low in copied:
+                        continue
+                    copied.add(low)
+                    shutil.copy2(os.path.join(root, fn),
+                                 os.path.join(lic_dir, f"{pkg}-{fn}"))
+                    pkg_lic_count += 1
     print(f"[许可] CPython LICENSE={'yes' if os.path.isfile(src_license) else 'no'}, "
-          f"Tcl/Tk license.terms={len(tcl_licenses)}")
+          f"Tcl/Tk license.terms={len(tcl_licenses)}, pip package licenses={pkg_lic_count}")
 
     # 原子替换：先把旧目录改名，再把新目录换上去；失败就恢复旧目录
     old = out + ".old"
@@ -267,8 +312,8 @@ def main():
 
     print()
     print("=" * 64)
-    print(f"[完成] .runtime\\python 已就绪：Python {out_ver} / {done} 个文件 / "
-          f"{total / 1048576:.1f} MB")
+    print(f"[完成] .runtime\\python 已就绪：Python {out_ver} / {final_files} 个文件 / "
+          f"{final_size / 1048576:.1f} MB")
     print("       试跑：.runtime\\python\\python.exe -c \"import bleak, ttkbootstrap\"")
     print("=" * 64)
     return 0

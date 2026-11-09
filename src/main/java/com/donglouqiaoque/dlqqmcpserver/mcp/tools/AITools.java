@@ -5,6 +5,8 @@ import com.donglouqiaoque.dlqqmcpserver.mcp.server.McpServer;
 import com.donglouqiaoque.dlqqmcpserver.utils.Workspace;
 
 import java.io.IOException;
+import java.nio.charset.Charset;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
 import com.google.gson.JsonArray;
@@ -550,6 +552,12 @@ public class AITools {
         charsetProp.put("description", "字符集编码（如 UTF-8、GBK、ISO-8859-1 等，默认为 UTF-8）");
         properties.put("charset", charsetProp);
 
+        Map<String, Object> expectedProp = new HashMap<>();
+        expectedProp.put("type", "string");
+        expectedProp.put("description", "校验用（可选，强烈建议）：目标行当前应有的内容。"
+            + "与实际内容不一致时拒绝修改，并在错误里回显实际内容，可避免按行号改错位置");
+        properties.put("expected_text", expectedProp);
+
         ToolInputSchema inputSchema = new ToolInputSchema(properties, Arrays.asList("file_path", "start_line", "end_line", "content"));
 
         server.addTool("dlqq_replace_lines_in_file",
@@ -573,6 +581,27 @@ public class AITools {
                         "1. JSON 字符串中的换行符 \\n 被当作实际换行，导致解析失败\n" +
                         "2. content 内容过长或包含特殊字符\n" +
                         "建议：将 \\n 替换为 \\\n 或使用 dlqq_insert_text_in_file 工具逐行插入");
+                }
+
+                // expected_text 校验：确认目标行当前内容与预期一致，避免按行号改错位置
+                Object expectedObj = arguments.get("expected_text");
+                if (expectedObj != null) {
+                    String expected = String.valueOf(expectedObj).replace("\r\n", "\n");
+                    String actual = "";
+                    try {
+                        Charset cs = Charset.forName(
+                                charset == null || charset.isEmpty() ? "UTF-8" : charset);
+                        List<String> fileLines = Files.readAllLines(Workspace.resolve(filePath), cs);
+                        int from = Math.max(1, startLine);
+                        int to = endLine == -1 ? fileLines.size() : Math.min(fileLines.size(), endLine);
+                        actual = from > to ? "" : String.join("\n", fileLines.subList(from - 1, to));
+                    } catch (Exception ignored) {
+                        // 读取失败时不阻断，交由后续逻辑处理
+                    }
+                    if (!expected.equals(actual)) {
+                        return errorResult("【拒绝修改】第 " + startLine + "-" + endLine
+                                + " 行与 expected_text 不一致，未做任何改动。\n\n实际内容:\n" + actual);
+                    }
                 }
 
                 try {
@@ -1343,8 +1372,7 @@ public class AITools {
                 String dirPath = (String) arguments.get("dir_path");
                 Integer maxDepth = parseInteger(arguments.get("max_depth"), -1);
                 Integer maxEntries = parseInteger(arguments.get("max_entries"), -1);
-                String showHiddenStr = (String) arguments.getOrDefault("show_hidden", "false");
-                boolean showHidden = Boolean.parseBoolean(showHiddenStr);
+                boolean showHidden = parseBoolean(arguments.get("show_hidden"), false);
 
                 if (dirPath == null || dirPath.trim().isEmpty()) {
                     return errorResult("目录路径不能为空");
@@ -1384,8 +1412,7 @@ public class AITools {
             inputSchema,
             arguments -> {
                 String dirPath = (String) arguments.get("dir_path");
-                String showHiddenStr = (String) arguments.getOrDefault("show_hidden", "false");
-                boolean showHidden = Boolean.parseBoolean(showHiddenStr);
+                boolean showHidden = parseBoolean(arguments.get("show_hidden"), false);
 
                 if (dirPath == null || dirPath.trim().isEmpty()) {
                     return errorResult("目录路径不能为空");
@@ -1483,7 +1510,7 @@ public class AITools {
             arguments -> {
                 String filePath = (String) arguments.get("file_path");
                 String hexContent = (String) arguments.get("hex_content");
-                Boolean append = (Boolean) arguments.getOrDefault("append", false);
+                Boolean append = parseBoolean(arguments.get("append"), false);
 
                 if (filePath == null || filePath.trim().isEmpty()) {
                     return errorResult("文件路径不能为空");
@@ -1674,7 +1701,7 @@ public class AITools {
                 String searchPath = (String) arguments.get("search_path");
                 String pattern = (String) arguments.get("pattern");
                 String mode = (String) arguments.getOrDefault("mode", "text");
-                Boolean ignoreCase = (Boolean) arguments.getOrDefault("ignore_case", true);
+                Boolean ignoreCase = parseBoolean(arguments.get("ignore_case"), true);
                 @SuppressWarnings("unchecked")
                 List<String> fileExtensions = (List<String>) arguments.get("file_extensions");
 
@@ -1761,7 +1788,7 @@ public class AITools {
                 String filePath = (String) arguments.get("file_path");
                 String pattern = (String) arguments.get("pattern");
                 String mode = (String) arguments.getOrDefault("mode", "text");
-                Boolean ignoreCase = (Boolean) arguments.getOrDefault("ignore_case", true);
+                Boolean ignoreCase = parseBoolean(arguments.get("ignore_case"), true);
 
                 // 从配置读取默认最大结果数
                 int defaultMaxResults = getSearchConfigInt("search.max.results", 50);
@@ -2743,15 +2770,36 @@ public class AITools {
     // ==================== 工具方法 ====================
 
     /**
-     * 创建文本结果
+     * 创建文本结果。
+     * 若文本属于拒绝/取消/失败类（无权限、用户拒绝、规则拦截等），
+     * 自动转为错误结果（isError=true），避免被当成正常返回。
      */
     private CallToolResult textResult(String text) {
+        if (isRefusal(text)) {
+            return errorResult(text);
+        }
         CallToolResult result = new CallToolResult();
         result.setError(false);
         List<ToolContent> content = new ArrayList<>();
         content.add(ToolContent.text(text));
         result.setContent(content);
         return result;
+    }
+
+    /**
+     * 判断工具输出是否属于拒绝/取消/失败类，需要以错误返回。
+     */
+    private boolean isRefusal(String text) {
+        if (text == null || text.isEmpty()) {
+            return false;
+        }
+        String[] prefixes = {"【拒绝", "【操作已取消】", "【失败", "✗", "错误：", "错误:", "[错误]"};
+        for (String prefix : prefixes) {
+            if (text.startsWith(prefix)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -2766,6 +2814,39 @@ public class AITools {
         return result;
     }
 
+    /**
+     * 解析布尔参数（兼容 Boolean、数字和字符串）：
+     * true/false、1/0、yes/no、on/off，无法识别时返回默认值。
+     */
+    private boolean parseBoolean(Object value, boolean defaultValue) {
+        if (value == null) {
+            return defaultValue;
+        }
+        if (value instanceof Boolean) {
+            return (Boolean) value;
+        }
+        if (value instanceof Number) {
+            return ((Number) value).intValue() != 0;
+        }
+        String s = String.valueOf(value).trim().toLowerCase();
+        if (s.isEmpty()) {
+            return defaultValue;
+        }
+        switch (s) {
+            case "true":
+            case "1":
+            case "yes":
+            case "on":
+                return true;
+            case "false":
+            case "0":
+            case "no":
+            case "off":
+                return false;
+            default:
+                return defaultValue;
+        }
+    }
     /**
      * 解析整数参数（兼容 Long、Integer 和 String）
      * 当传入非空值但无法解析时抛出IllegalArgumentException，确保AI传错参数时报错而不是使用默认值
@@ -2882,54 +2963,6 @@ public class AITools {
     }
 
     // ==================== BLE库管理工具 ====================
-
-    /**
-     * 30. dlqq_ble_lib_has - 检查Python BLE库状态
-     */
-    private void registerBleLibHasTool(McpServer server) {
-        Map<String, Object> properties = new HashMap<>();
-        ToolInputSchema inputSchema = new ToolInputSchema(properties, Collections.emptyList());
-
-        server.addTool("dlqq_ble_lib_has",
-            "检查Python BLE库（bleak）是否已安装，返回Python版本和各库的安装状态及版本信息。如果库未安装，需要先使用 dlqq_ble_lib_install 安装。",
-            inputSchema,
-            arguments -> {
-                String result = BleTools.bleLibHas();
-                return textResult(result);
-            });
-    }
-
-    /**
-     * 31. dlqq_ble_lib_install - 安装Python BLE库
-     */
-    private void registerBleLibInstallTool(McpServer server) {
-        Map<String, Object> properties = new HashMap<>();
-        ToolInputSchema inputSchema = new ToolInputSchema(properties, Collections.emptyList());
-
-        server.addTool("dlqq_ble_lib_install",
-            "自动安装Python BLE依赖库（bleak）。需要先确保Python 3.8+已安装且python命令可用。安装完成后可以使用 dlqq_ble_lib_has 检查安装结果。",
-            inputSchema,
-            arguments -> {
-                String result = BleTools.bleLibInstall();
-                return textResult(result);
-            });
-    }
-
-    /**
-     * 32. dlqq_ble_lib_update - 检查并更新Python BLE库
-     */
-    private void registerBleLibUpdateTool(McpServer server) {
-        Map<String, Object> properties = new HashMap<>();
-        ToolInputSchema inputSchema = new ToolInputSchema(properties, Collections.emptyList());
-
-        server.addTool("dlqq_ble_lib_update",
-            "检查Python BLE库是否有新版本可用，如果有更新会弹出对话框让用户选择是否立即更新。如果用户选择更新，会自动执行更新操作。",
-            inputSchema,
-            arguments -> {
-                String result = BleTools.bleLibUpdate();
-                return textResult(result);
-            });
-    }
 
     /**
      * 33. dlqq_ble_release_script - 释放Python脚本到项目目录
@@ -3423,7 +3456,7 @@ public class AITools {
                 Integer port = parseInteger(arguments.get("port"), null);
                 String serviceUuid = (String) arguments.get("service_uuid");
                 String charUuid = (String) arguments.get("char_uuid");
-                Boolean enable = (Boolean) arguments.getOrDefault("enable", true);
+                Boolean enable = parseBoolean(arguments.get("enable"), true);
 
                 if (port == null) {
                     return errorResult("必须指定端口号（port）");
@@ -5128,7 +5161,7 @@ public class AITools {
             inputSchema,
             arguments -> {
                 String path = (String) arguments.get("path");
-                Boolean isDirectory = (Boolean) arguments.get("is_directory");
+                Boolean isDirectory = parseBoolean(arguments.get("is_directory"), false);
                 @SuppressWarnings("unchecked")
                 List<String> extensions = (List<String>) arguments.get("file_extensions");
 
@@ -5181,7 +5214,7 @@ public class AITools {
             inputSchema,
             arguments -> {
                 String path = (String) arguments.get("path");
-                Boolean isDirectory = (Boolean) arguments.get("is_directory");
+                Boolean isDirectory = parseBoolean(arguments.get("is_directory"), false);
                 @SuppressWarnings("unchecked")
                 List<String> extensions = (List<String>) arguments.get("file_extensions");
 

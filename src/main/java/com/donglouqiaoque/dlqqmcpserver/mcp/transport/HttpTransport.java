@@ -25,6 +25,9 @@ import java.io.OutputStream;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * MCP Streamable HTTP 传输层（基于 JDK 内置 HttpServer，无需额外依赖）。
@@ -69,6 +72,12 @@ public class HttpTransport implements McpTransport {
 
     /** 已建立的 SSE 长连接（GET + Accept: text/event-stream），用于服务端主动推送通知 */
     private final List<SseClient> sseClients = new CopyOnWriteArrayList<>();
+
+    /**
+     * 已发放的会话 ID（initialize 时生成）。
+     * 服务端重启后集合清空，旧会话的请求会收到 404，客户端据此重新初始化。
+     */
+    private final Set<String> sessions = ConcurrentHashMap.newKeySet();
 
     /** 一个 SSE 客户端连接的输出流（写操作需持有 lock） */
     private static final class SseClient {
@@ -323,6 +332,22 @@ public class HttpTransport implements McpTransport {
         logger.info("[HttpTransport] Received JSON-RPC request: method={}, id={}, isNotification={}",
                 request.getMethod(), request.getId(), request.isNotification());
 
+        // 会话管理：initialize 时发放 Mcp-Session-Id 并记录。
+        // 注意：实测 DSH 的客户端收到 404 不会自动重新 initialize，只会把错误抛给调用方，
+        // 因此这里不做强制校验（保持无状态兼容），仅记录未知会话，便于诊断。
+        if ("initialize".equals(request.getMethod())) {
+            String newSessionId = UUID.randomUUID().toString();
+            sessions.add(newSessionId);
+            exchange.getResponseHeaders().set("Mcp-Session-Id", newSessionId);
+            logger.info("[HttpTransport] Session created: {}", newSessionId);
+        } else {
+            String sessionId = exchange.getRequestHeaders().getFirst("Mcp-Session-Id");
+            if (sessionId != null && !sessions.contains(sessionId)) {
+                logger.info("[HttpTransport] Unknown session {} (method={}), accepted statelessly",
+                        sessionId, request.getMethod());
+            }
+        }
+
         Consumer<JsonRpcMessage.Request> handler = messageHandler;
         if (handler == null) {
             sendJson(exchange, 500, jsonRpcError(request.getId(), JsonRpcMessage.ERROR_INTERNAL_ERROR,
@@ -373,7 +398,12 @@ public class HttpTransport implements McpTransport {
     }
 
     private void handleDelete(HttpExchange exchange) throws IOException {
-        // 无状态模式：直接确认会话终止
+        // 会话终止：移出会话表（后续同 ID 请求会得到 404）
+        String sessionId = exchange.getRequestHeaders().getFirst("Mcp-Session-Id");
+        if (sessionId != null) {
+            sessions.remove(sessionId);
+            logger.info("[HttpTransport] Session terminated: {}", sessionId);
+        }
         sendEmpty(exchange, 200);
     }
 

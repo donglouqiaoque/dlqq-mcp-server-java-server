@@ -198,7 +198,7 @@ src/main/resources/
 
 ## 六、工具速查
 
-共 **167** 个工具（154 个常规工具 + 13 个 `dlqq_set_*_script`），实现见 `mcp/tools/`，逐个参数说明见 [README.md](README.md)。
+共 **169** 个工具（156 个常规工具 + 13 个 `dlqq_set_*_script`），实现见 `mcp/tools/`，逐个参数说明见 [README.md](README.md)。
 
 | 分组 | 数量 | 说明 |
 |------|------|------|
@@ -217,7 +217,7 @@ src/main/resources/
 | 图片转换 | 1 | `dlqq_convert_image`（SVG/PNG/JPG/GIF/BMP，Batik 渲染 SVG） |
 | 时间 | 1 | `dlqq_get_current_time` |
 | 计算器 | 3 | 数学 / 程序 / 函数 |
-| 命令执行 | 1 | `dlqq_run_command`（JFrame 人工确认） |
+| 命令执行 | 3 | `dlqq_run_command`（cmd）、`dlqq_run_powershell`（PowerShell 5.1）、`dlqq_run_pwsh`（PowerShell 7），均含 JFrame 人工确认 |
 | Office | 2 | 读取转 Markdown、格式转换 |
 | 压缩解压 | 2 | zip4j + commons-compress |
 | MCP 数据/属性 | 15 | 版本信息（含编译进代码的真实构建时间）、热加载测试、动态工具管理（移除/刷新/恢复/直接调用）、工作区设置与权限（set/get/reset/permission）、属性读写、清理数据/缓存/日志 |

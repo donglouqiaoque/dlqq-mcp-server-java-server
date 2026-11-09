@@ -3,7 +3,7 @@
 A **Model Context Protocol (MCP) server** written in Java. It provides local tool capabilities to AI agents (DeepSeek Harness, Qwen Code, Claude Code, Cursor, Cline, VS Code, Windsurf, …): files, serial ports, BLE, USB, Wi-Fi, Office, ZIP, screenshots, image conversion, and more.
 
 - **Transport**: stdio (default) and Streamable HTTP
-- **Tools**: 167 (154 regular tools + 13 `dlqq_set_*_script` helpers)
+- **Tools**: 169 (156 regular tools + 13 `dlqq_set_*_script` helpers)
 - **Runtime**: Java 25+ (**full JRE required**, see below)
 - **JAR name**: `dlqq_mcp_server.jar`
 
@@ -639,11 +639,13 @@ Parameter lists below: `name` = required, `[name]` = optional. Path parameters a
 | `dlqq_calculator_programmer` | `expression`*, `[type]` | Bitwise, shifts, base conversion |
 | `dlqq_calculator_function` | `expression`*, `[variables]` | Custom functions with variables |
 
-### Command tool (1)
+### Command tools (3)
 
 | Tool | Parameters | Notes |
 |------|------------|-------|
-| `dlqq_run_command` | `command`*, `[working_dir]`, `[timeout]`, `[no_wait]` | JFrame confirmation before execution; `cmd /c` or `sh -c`; `no_wait=true` starts it in the background and returns the PID and log path immediately |
+| `dlqq_run_command` | `command`*, `[working_dir]`, `[timeout]`, `[no_wait]` | Runs through `cmd /c` (or `sh -c`); JFrame confirmation before execution; `no_wait=true` starts it in the background and returns the PID and log path immediately |
+| `dlqq_run_powershell` | `command`*, `[working_dir]`, `[timeout]`, `[no_wait]` | Runs through `powershell.exe` (Windows PowerShell 5.1); JFrame confirmation; same parameters as `dlqq_run_command` |
+| `dlqq_run_pwsh` | `command`*, `[working_dir]`, `[timeout]`, `[no_wait]` | Runs through `pwsh.exe` (PowerShell 7+); JFrame confirmation; same parameters as `dlqq_run_command` |
 
 ### Office tools (2)
 

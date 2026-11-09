@@ -197,7 +197,7 @@ Runtime directories (created on first start, ignored by `.gitignore`): inside th
 
 ## 6. Tool overview
 
-**166** tools in total (153 regular tools + 13 `dlqq_set_*_script` helpers). Implementations live in `mcp/tools/`; parameters are documented in [README.en.md](README.en.md).
+**169** tools in total (156 regular tools + 13 `dlqq_set_*_script` helpers). Implementations live in `mcp/tools/`; parameters are documented in [README.en.md](README.en.md).
 
 | Group | Count | Notes |
 |-------|-------|-------|
@@ -216,7 +216,7 @@ Runtime directories (created on first start, ignored by `.gitignore`): inside th
 | Image conversion | 1 | `dlqq_convert_image` (SVG/PNG/JPG/GIF/BMP, Batik renders SVG) |
 | Time | 1 | `dlqq_get_current_time` |
 | Calculators | 3 | math / programmer / function |
-| Command execution | 1 | `dlqq_run_command` (JFrame confirmation) |
+| Command execution | 3 | `dlqq_run_command` (cmd), `dlqq_run_powershell` (PowerShell 5.1), `dlqq_run_pwsh` (PowerShell 7); all with JFrame confirmation |
 | Office | 2 | read to Markdown, format conversion |
 | Archive | 2 | zip4j + commons-compress |
 | MCP data/properties | 15 | version info (real build time compiled into the class), hot-reload check, dynamic tool management (remove/refresh/reset/run), workspace set/get/reset/permission, property read/write, cleanup of data/cache/logs |
