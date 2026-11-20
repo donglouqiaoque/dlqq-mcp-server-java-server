@@ -5,11 +5,10 @@ target
 .dlqq
 .ai_res
 .release
+.venv
 
 .runtime/*
-!.runtime/*.bat
-!.runtime/*.py
-!.runtime/libs
-.runtime/libs/*
+!.runtime/start-http.bat
+!.runtime/build.bat
 
 !.gitkeep

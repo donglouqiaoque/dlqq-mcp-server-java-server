@@ -24,7 +24,7 @@
 
 ## 工具列表
 
-本MCP服务器提供 **169** 个工具（156 个常规工具 + 13 个 `dlqq_set_*_script` 脚本路径设置工具）。
+本MCP服务器当前注册 **183** 个工具（运行时可调用），另有 1 个源码屏蔽、2 个规划中的工具定义，合计 185 条；完整风险等级与隐藏状态见[工具风险等级与隐藏状态](#工具风险等级与隐藏状态)。
 > 说明：分组标题中的序号为历史遗留编号，实际工具数以各分组表格为准。
 
 产物 JAR 名为 **`dlqq_mcp_server.jar`**。
@@ -171,12 +171,13 @@
 
 | 工具名称 | 描述 |
 |---------|------|
-| `dlqq_zip` | 压缩文件或目录为ZIP格式，支持多文件压缩、密码保护、压缩级别设置（1-9），默认输出到 `.dlqq/cache` |
-| `dlqq_unzip` | 解压多种压缩格式（ZIP/7Z/TAR/GZ/BZ2/XZ/RAR/CPIO/AR等），ZIP支持密码保护，默认解压到 `.dlqq/cache` |
+| `dlqq_zip` | 压缩文件或目录。支持 zip（多文件/密码/压缩级别 1-9）与 zstd（单文件生成 `.zst`，目录或多源生成 `.tar.zst`），默认输出到 `.dlqq/cache` |
+| `dlqq_unzip` | 解压多种压缩格式（ZIP/7Z/TAR/GZ/BZ2/XZ/ZSTD/RAR/CPIO/AR等），ZIP支持密码保护，默认解压到 `.dlqq/cache`；`detect_mode` 控制格式判定 |
 
 **说明**：
-- 压缩格式：仅支持 ZIP（AES-256 加密，压缩级别 1-9，默认 5）
-- **解压格式**：zip、7z、tar、tar.gz、tgz、tar.bz2、tar.xz、gz、bz2、xz、rar、jar、war、cpio、ar
+- 压缩格式：zip（AES-256 加密，压缩级别 1-9，默认 5）、zstd（级别映射到 1-9）
+- **解压格式**：zip、7z、tar、tar.gz、tgz、tar.bz2、tbz2、tar.xz、txz、gz、bz2、xz、zstd、zst、tar.zst、tzst、rar、jar、war、cpio、ar
+- **`detect_mode`（解压）**：`0`=严格按后缀名（格式与后缀不符则报错）；`1`=先按后缀，不符或识别不出时探测真实格式；`2`=忽略后缀，只按文件头魔数判断。默认 `0`
 - 密码仅适用于ZIP格式（7z/rar加密暂不支持）
 - 多文件压缩：`source_paths` 参数支持多个文件/目录路径
 - **默认输出目录**：未指定 `output_path` / `output_dir` 时，统一保存到 `.dlqq/cache`
@@ -697,7 +698,7 @@ Claude Desktop 使用 `claude_desktop_config.json`（Windows：`%APPDATA%\Claude
 java -jar dlqq_mcp_server.jar --transport http --port 49129 --path /mcp
 ```
 
-端点：`http://127.0.0.1:49129/mcp`（端口/路径按启动参数调整；服务端无鉴权、无会话状态，各客户端直接填 URL 即可）。
+端点：`http://127.0.0.1:49129/mcp`（端口/路径按启动参数调整；服务端无鉴权；会话隔离按 `params._meta` 判定，HTTP 的 `Mcp-Session-Id` 仅用于协议会话，各客户端直接填 URL 即可）。
 
 **DeepSeek Harness (DSH)** — `~/.dsh/profiles/desktop/cordis.patch.yml`（`transport: streamable-http` + `url`）：
 
@@ -811,6 +812,9 @@ claude mcp add --transport http dlqq-mcp-server http://127.0.0.1:49129/mcp
 | `--port N` | HTTP 端口，默认 49129 |
 | `--path /mcp` | HTTP 路径，默认 `/mcp` |
 | `--workspace <dir>` | 工作区目录：所有工具的相对路径基于它解析（仅本次运行有效，不持久化） |
+| `--session-meta-key <key>` | 会话隔离使用的 `params._meta` 键名，默认 `dsh/sessionId` |
+| `--session-agent-meta-key <key>` | Agent 隔离使用的 `params._meta` 键名，默认 `dsh/agentId` |
+| `--session-idle-minutes <n>` | 空闲会话回收时间（分钟），默认 30；`0` 表示不回收 |
 
 #### STDIO（默认）
 
@@ -2808,6 +2812,100 @@ settings.json
 - 命令超时后会强制终止进程
 - 返回结果包含：命令、工作目录、退出码、状态、输出内容
 
+## 权限与超时
+
+### 两级权限（不再使用旧的 workspace.write.mode）
+
+| 配置项 | 说明 |
+|---|---|
+| `permission.resource.level` | **资源权限**：文件、目录、命令/进程、压缩包、MCP 自身数据等 |
+| `permission.operation.level` | **操作权限**：鼠标、键盘、屏幕、串口、BLE、WiFi、USB 等外设操作 |
+| `tool.policy.<工具名>` | 自定义权限时的逐工具覆盖（allow / approve / deny） |
+
+**资源权限**默认 `approval`（工作区外需要审批），可选值：
+`chat` < `readonly` < `workspace` < `approval` < `highrisk` < `full` < `custom`。
+
+**操作权限**默认 `approval`（需要批准），可选值：
+`readonly` < `approval` < `highrisk` < `full` < `custom`。
+
+- 旧的 `workspace.write.mode` 已废弃：不再读取，写入新键时会自动从配置文件删除；
+- `.dlqq` 目录（配置/日志/缓存/脚本）**任何权限等级下都禁止 AI 修改**；
+- 权限只能通过 `dlqq_workspace_permission_set` 修改（`dlqq_set_mcp_properties` 拒绝权限类键名）。
+
+### 工作区切换
+
+- `dlqq_workspace_set` / `dlqq_workspace_reset` 在**任意权限等级下都可调用**；
+- 目标工作区与当前一致 → 直接返回"无需修改"，不弹窗口；
+- 切换/重置工作区**始终需要用户审批**，审批窗口带倒计时。
+
+### 权限提升
+
+- 降权/同级：直接执行，不弹窗口；
+- 提权：弹"权限提权审批"窗口，带倒计时，超时自动取消。
+
+### 工具超时
+
+- 客户端（DSH 插件）默认单次工具调用超时 **60 秒**，可通过 `toolCallTimeoutMs` 配置；
+- 服务端**单次工具调用总超时 = 审批时间 + 运行时间**，默认 **50 秒**；
+- 可通过请求指定：`params._meta["dlqq/toolTimeoutSeconds"]` 或参数 `tool_timeout_seconds`；
+- 后台进程类调用（`no_wait=true`）立即返回，不受总超时限制；
+- 超时处理：**立即关闭审批窗口、中断工具执行并返回明确错误**；
+- 所有审批窗口的倒计时 = 工具总超时的剩余时间，超时自动关闭并返回"用户未批准"。
+
+## 单进程多会话（会话隔离）
+
+同一个服务进程可以同时服务多个对话会话、多个 Agent，每个会话拥有**独立的工作区与配置**。
+
+### 会话标识来源（stdio 与 HTTP 通用）
+
+只认 `params._meta`，由客户端在每次 `tools/call` 时携带：
+
+| 键（默认，可用启动参数改） | 含义 |
+|---|---|
+| `dsh/sessionId`（`--session-meta-key`） | 对话/会话 ID |
+| `dsh/agentId`（`--session-agent-meta-key`） | Agent ID（主 Agent / 子 Agent） |
+
+服务端会话键：
+
+- 两个都提供 → `session:<会话>|agent:<Agent>`（对话 × Agent 二维隔离）；
+- 只提供会话 → `session:<会话>`；
+- 只提供 Agent → `agent:<Agent>`；
+- **都不提供 → 默认会话**（进程级，不区分多会话，兼容不支持多会话的客户端）。
+
+HTTP 的 `Mcp-Session-Id` 只用于协议与 SSE，**不参与工作区隔离**。
+
+### 会话级状态
+
+每个会话独立维护：
+
+- 工作区根目录（`dlqq_workspace_set` / `dlqq_workspace_get` / `dlqq_workspace_reset` 只影响当前会话）；
+- 修改权限（`workspace.write.mode`）；
+- 会话工作区下的全部 `settings.properties` 配置（脚本路径、搜索配置、属性、排除工具等）。
+
+因此不同对话可以分别指向不同项目目录，互不干扰。
+
+### 生命周期
+
+| 事件 | 处理 |
+|------|------|
+| 首次出现新会话键 | 创建会话，工作区 = 启动基准工作区（`--workspace` 或进程 CWD） |
+| 空闲超过 `--session-idle-minutes` | 后台线程回收（默认 30 分钟，`0` 关闭） |
+| HTTP `DELETE` | 只移除协议会话；`_meta` 会话由空闲回收负责 |
+
+### 诊断
+
+`dlqq_workspace_get` 返回：当前会话键、会话键名、Agent 键名、活跃会话数、当前工作区与权限。
+
+### 客户端配合（DSH）
+
+DSH 官方 `@deepseek-ai/dsh-mcp-client` 不发送 `_meta`，所有对话共享默认会话。
+需要配合仓库 `dlqq-mcp-server-dsh-client`（本项目的 DSH 插件 fork），它会在每次
+`tools/call` 中写入：
+
+```json
+"_meta": { "dsh/sessionId": "<会话ID>", "dsh/agentId": "<AgentID>" }
+```
+
 ## 热加载（更新 JAR）说明
 
 ### 相关工具
@@ -2859,6 +2957,341 @@ settings.json
 - **字体缓存**：PDFBox 会尝试写 `~/.pdfbox.cache`，写不进去只会在每次启动时重建缓存（多花 1~3 秒），不影响功能；可用 `-Dpdfbox.fontcache=<可写目录>` 指定。
 - **硬件相关工具**：串口 / BLE / USB 在没有对应硬件时只能验证窗口与管理类接口，收发的端到端链路需要实机验证。
 - **GUI 工具**：串口、BLE、WiFi、命令确认等依赖桌面环境，纯服务器（无显示）环境下不可用。
+
+## 工具风险等级与隐藏状态
+
+### 1. 风险等级定义
+
+**设备资源**（文件、目录、进程、权限等）
+
+| 等级 | 描述 |
+|---|---|
+| 无危 | 该工具执行不会影响任何设备资源。 |
+| 风险 | 该工具会影响到设备资源，但是在可控范围内且容易恢复。 |
+| 高危 | 该工具会影响到设备资源，且造成的影响不可预知或难以恢复。 |
+
+**设备外设**（鼠标、键盘、屏幕、蓝牙、WiFi、USB 等）
+
+| 等级 | 描述 |
+|---|---|
+| 无危 | 该工具执行不会影响任何设备外设。 |
+| 风险 | 该工具会影响到设备外设，但是在可控范围内且容易恢复。 |
+| 高危 | 该工具会影响到设备外设，且造成的影响不可预知或难以恢复。 |
+
+### 2. AI 权限等级
+
+**资源侧**
+
+| AI 权限等级 | 无危工具 | 风险工具 | 高危工具 |
+|---|---|---|---|
+| 对话模式 | 禁止执行 | 禁止执行 | 禁止执行 |
+| 只读模式 | 允许执行 | 禁止执行 | 禁止执行 |
+| 工作区内修改 | 允许执行 | 工作区内允许，工作区外禁止 | 禁止执行 |
+| 工作区外需要批准（默认） | 允许执行 | 工作区内允许，工作区外需要批准 | 工作区内外均需要批准 |
+| 高危工具需要批准 | 允许执行 | 允许执行 | 工作区内外均需要批准 |
+| 完全权限 | 允许执行 | 允许执行 | 允许执行 |
+| 自定义权限 | 依据配置文件 | 依据配置文件 | 依据配置文件 |
+
+**外设侧**
+
+| AI 权限等级 | 无危工具 | 风险工具 | 高危工具 |
+|---|---|---|---|
+| 对话模式 | 禁止执行 | 禁止执行 | 禁止执行 |
+| 只读模式 | 允许执行 | 禁止执行 | 禁止执行 |
+| 需要批准（默认） | 允许执行 | 需要批准 | 需要批准 |
+| 高危工具需要批准 | 允许执行 | 允许执行 | 需要批准 |
+| 完全权限 | 允许执行 | 允许执行 | 允许执行 |
+| 自定义权限 | 依据配置文件 | 依据配置文件 | 依据配置文件 |
+
+**资源区域**
+
+| 资源区域 | 路径 | 描述 | 访问权限 |
+|---|---|---|---|
+| 缓存区域 | `<工作区>/.dlqq/cache` | 工具临时存储的数据 | 允许工具读写 |
+| 数据区域 | `<工作区>/.dlqq/data` | 工具长期存储的数据 | 允许工具读写 |
+| 外部区域 | 任意目录 | 工具需要用户指定资源目录 | 跟随设备资源权限 |
+
+### 3. 隐藏状态
+
+| 状态 | 描述 |
+|---|---|
+| 完全访问 | AI Agent 可以直接调用该工具。 |
+| 仅可查看 | AI Agent 只可以查看该工具描述，调用会被直接拒绝。 |
+| 已被隐藏 | AI Agent 完全不知道有这个工具，默认不暴露给 AI。 |
+| 源码屏蔽 | 源代码已注释，只有修改源码才能调用。 |
+
+### 4. 工具清单
+
+#### 4.1 文件操作（19）
+
+| 工具名称 | 资源风险 | 外设风险 | 默认隐藏状态 |
+|---|---|---|---|
+| dlqq_read_file | 无危 | 无危 | 完全访问 |
+| dlqq_read_bin_file | 无危 | 无危 | 完全访问 |
+| dlqq_create_file | 风险 | 无危 | 完全访问 |
+| dlqq_overwrite_file | 高危 | 无危 | 完全访问 |
+| dlqq_append_file | 风险 | 无危 | 完全访问 |
+| dlqq_clear_file | 高危 | 无危 | 完全访问 |
+| dlqq_insert_text_in_file | 风险 | 无危 | 已被隐藏 |
+| dlqq_replace_text_in_file | 风险 | 无危 | 完全访问 |
+| dlqq_replace_text_in_dir | 高危 | 无危 | 完全访问 |
+| dlqq_replace_lines_in_file | 风险 | 无危 | 已被隐藏 |
+| dlqq_remove_lines_in_file | 风险 | 无危 | 已被隐藏 |
+| dlqq_remove_text_in_file | 风险 | 无危 | 已被隐藏 |
+| dlqq_copy_file | 风险 | 无危 | 完全访问 |
+| dlqq_move_file | 高危 | 无危 | 完全访问 |
+| dlqq_rename_file | 风险 | 无危 | 完全访问 |
+| dlqq_delete_file | 高危 | 无危 | 完全访问 |
+| dlqq_write_bin_file | 风险 | 无危 | 完全访问 |
+| dlqq_add_unicode_bom | 风险 | 无危 | 完全访问 |
+| dlqq_remove_unicode_bom | 风险 | 无危 | 完全访问 |
+
+#### 4.2 目录操作（8）
+
+| 工具名称 | 资源风险 | 外设风险 | 默认隐藏状态 |
+|---|---|---|---|
+| dlqq_list_dir_files | 无危 | 无危 | 完全访问 |
+| dlqq_list_dir_tree | 无危 | 无危 | 完全访问 |
+| dlqq_mdir | 风险 | 无危 | 完全访问 |
+| dlqq_mdirs | 风险 | 无危 | 完全访问 |
+| dlqq_copy_dir | 风险 | 无危 | 完全访问 |
+| dlqq_move_dir | 高危 | 无危 | 完全访问 |
+| dlqq_rename_dir | 风险 | 无危 | 完全访问 |
+| dlqq_delete_dir | 高危 | 无危 | 完全访问 |
+
+#### 4.3 搜索（4）
+
+| 工具名称 | 资源风险 | 外设风险 | 默认隐藏状态 |
+|---|---|---|---|
+| dlqq_search_file | 无危 | 无危 | 完全访问 |
+| dlqq_search_dir | 无危 | 无危 | 完全访问 |
+| dlqq_search_text_in_file | 无危 | 无危 | 完全访问 |
+| dlqq_search_text_in_dir | 无危 | 无危 | 完全访问 |
+
+#### 4.4 压缩解压（2）
+
+| 工具名称 | 资源风险 | 外设风险 | 默认隐藏状态 |
+|---|---|---|---|
+| dlqq_zip | 高危 | 无危 | 完全访问 |
+| dlqq_unzip | 高危 | 无危 | 完全访问 |
+
+#### 4.5 命令执行与后台程序（18）
+
+| 工具名称 | 资源风险 | 外设风险 | 默认隐藏状态 |
+|---|---|---|---|
+| dlqq_run_command | 高危 | 无危 | 完全访问 |
+| dlqq_run_powershell | 高危 | 无危 | 完全访问 |
+| dlqq_run_pwsh | 高危 | 无危 | 完全访问 |
+| dlqq_get_command_list | 无危 | 无危 | 完全访问 |
+| dlqq_get_command_log | 无危 | 无危 | 完全访问 |
+| dlqq_kill_command | 高危 | 无危 | 完全访问 |
+| dlqq_clear_command_list | 风险 | 无危 | 完全访问 |
+| dlqq_refresh_command_list | 无危 | 无危 | 完全访问 |
+| dlqq_get_powershell_list | 无危 | 无危 | 完全访问 |
+| dlqq_get_powershell_log | 无危 | 无危 | 完全访问 |
+| dlqq_kill_powershell | 高危 | 无危 | 完全访问 |
+| dlqq_clear_powershell_list | 风险 | 无危 | 完全访问 |
+| dlqq_refresh_powershell_list | 无危 | 无危 | 完全访问 |
+| dlqq_get_pwsh_list | 无危 | 无危 | 完全访问 |
+| dlqq_get_pwsh_log | 无危 | 无危 | 完全访问 |
+| dlqq_kill_pwsh | 高危 | 无危 | 完全访问 |
+| dlqq_clear_pwsh_list | 风险 | 无危 | 完全访问 |
+| dlqq_refresh_pwsh_list | 无危 | 无危 | 完全访问 |
+
+#### 4.6 串口 UART（17）
+
+| 工具名称 | 资源风险 | 外设风险 | 默认隐藏状态 |
+|---|---|---|---|
+| dlqq_run_uart | 无危 | 风险 | 完全访问 |
+| dlqq_rerun_uart | 无危 | 风险 | 完全访问 |
+| dlqq_exit_uart | 无危 | 风险 | 完全访问 |
+| dlqq_uart_open_com | 无危 | 风险 | 完全访问 |
+| dlqq_uart_close_com | 无危 | 风险 | 完全访问 |
+| dlqq_uart_reopen_com | 无危 | 风险 | 完全访问 |
+| dlqq_uart_refresh_com | 无危 | 无危 | 完全访问 |
+| dlqq_uart_get_com | 无危 | 无危 | 完全访问 |
+| dlqq_uart_send_text | 无危 | 风险 | 完全访问 |
+| dlqq_uart_send_hex | 无危 | 风险 | 完全访问 |
+| dlqq_uart_get_log | 无危 | 无危 | 完全访问 |
+| dlqq_uart_get_log_text | 无危 | 无危 | 完全访问 |
+| dlqq_uart_get_log_hex | 无危 | 无危 | 完全访问 |
+| dlqq_uart_switch_text_hex | 无危 | 无危 | 完全访问 |
+| dlqq_uart_clear_text | 无危 | 无危 | 完全访问 |
+| dlqq_uart_get_line_count | 无危 | 无危 | 完全访问 |
+| dlqq_uart_set_text_size | 无危 | 无危 | 完全访问 |
+
+#### 4.7 蓝牙 BLE（21）
+
+| 工具名称 | 资源风险 | 外设风险 | 默认隐藏状态 |
+|---|---|---|---|
+| dlqq_run_ble | 无危 | 风险 | 完全访问 |
+| dlqq_rerun_ble | 无危 | 风险 | 完全访问 |
+| dlqq_exit_ble | 无危 | 风险 | 完全访问 |
+| dlqq_ble_scan | 无危 | 风险 | 完全访问 |
+| dlqq_ble_get_devices | 无危 | 无危 | 完全访问 |
+| dlqq_ble_connect | 无危 | 风险 | 完全访问 |
+| dlqq_ble_disconnect | 无危 | 风险 | 完全访问 |
+| dlqq_ble_discover | 无危 | 风险 | 完全访问 |
+| dlqq_ble_read | 无危 | 无危 | 完全访问 |
+| dlqq_ble_write_text | 无危 | 风险 | 完全访问 |
+| dlqq_ble_write_hex | 无危 | 风险 | 完全访问 |
+| dlqq_ble_subscribe | 无危 | 风险 | 完全访问 |
+| dlqq_ble_get_log | 无危 | 无危 | 完全访问 |
+| dlqq_ble_get_log_text | 无危 | 无危 | 完全访问 |
+| dlqq_ble_get_log_hex | 无危 | 无危 | 完全访问 |
+| dlqq_ble_switch_text_hex | 无危 | 无危 | 完全访问 |
+| dlqq_ble_clear | 无危 | 无危 | 完全访问 |
+| dlqq_ble_get_line_count | 无危 | 无危 | 完全访问 |
+| dlqq_ble_set_buffer_size | 无危 | 无危 | 完全访问 |
+| dlqq_ble_release_script | 风险 | 无危 | 完全访问 |
+| dlqq_check_bluetooth_open | 无危 | 无危 | 完全访问 |
+
+#### 4.8 USB（15）
+
+| 工具名称 | 资源风险 | 外设风险 | 默认隐藏状态 |
+|---|---|---|---|
+| dlqq_run_usb | 无危 | 风险 | 完全访问 |
+| dlqq_rerun_usb | 无危 | 风险 | 完全访问 |
+| dlqq_exit_usb | 无危 | 风险 | 完全访问 |
+| dlqq_usb_scan | 无危 | 风险 | 完全访问 |
+| dlqq_usb_get_devices | 无危 | 无危 | 完全访问 |
+| dlqq_usb_open | 无危 | 风险 | 完全访问 |
+| dlqq_usb_close | 无危 | 风险 | 完全访问 |
+| dlqq_usb_send_text | 无危 | 风险 | 完全访问 |
+| dlqq_usb_send_hex | 无危 | 风险 | 完全访问 |
+| dlqq_usb_get_log | 无危 | 无危 | 完全访问 |
+| dlqq_usb_get_log_text | 无危 | 无危 | 完全访问 |
+| dlqq_usb_get_log_hex | 无危 | 无危 | 完全访问 |
+| dlqq_usb_switch_text_hex | 无危 | 无危 | 完全访问 |
+| dlqq_usb_clear | 无危 | 无危 | 完全访问 |
+| dlqq_usb_get_line_count | 无危 | 无危 | 完全访问 |
+
+#### 4.9 WiFi（12）
+
+| 工具名称 | 资源风险 | 外设风险 | 默认隐藏状态 |
+|---|---|---|---|
+| dlqq_run_wifi | 无危 | 风险 | 完全访问 |
+| dlqq_rerun_wifi | 无危 | 风险 | 完全访问 |
+| dlqq_exit_wifi | 无危 | 风险 | 完全访问 |
+| dlqq_wifi_scan | 无危 | 风险 | 完全访问 |
+| dlqq_wifi_get_networks | 无危 | 无危 | 完全访问 |
+| dlqq_wifi_connect | 无危 | 风险 | 完全访问 |
+| dlqq_wifi_disconnect | 无危 | 风险 | 完全访问 |
+| dlqq_wifi_status | 无危 | 无危 | 完全访问 |
+| dlqq_wifi_profiles | 无危 | 无危 | 完全访问 |
+| dlqq_wifi_get_log | 无危 | 无危 | 完全访问 |
+| dlqq_wifi_clear_log | 无危 | 无危 | 完全访问 |
+| dlqq_wifi_get_line_count | 无危 | 无危 | 完全访问 |
+
+#### 4.10 鼠标 / 键盘 / 屏幕（14）
+
+| 工具名称 | 资源风险 | 外设风险 | 默认隐藏状态 |
+|---|---|---|---|
+| dlqq_mouse_move | 无危 | 风险 | 完全访问 |
+| dlqq_mouse_click | 无危 | 风险 | 完全访问 |
+| dlqq_mouse_press | 无危 | 风险 | 完全访问 |
+| dlqq_mouse_release | 无危 | 风险 | 完全访问 |
+| dlqq_mouse_drag | 无危 | 风险 | 完全访问 |
+| dlqq_mouse_scroll | 无危 | 风险 | 完全访问 |
+| dlqq_mouse_get_position | 无危 | 无危 | 完全访问 |
+| dlqq_keyboard_type | 无危 | 风险 | 完全访问 |
+| dlqq_keyboard_tap | 无危 | 风险 | 完全访问 |
+| dlqq_keyboard_press | 无危 | 风险 | 完全访问 |
+| dlqq_keyboard_release | 无危 | 风险 | 完全访问 |
+| dlqq_keyboard_hotkey | 无危 | 风险 | 完全访问 |
+| dlqq_keyboard_key_list | 无危 | 无危 | 完全访问 |
+| dlqq_capture_screen | 风险 | 风险 | 完全访问 |
+
+#### 4.11 对话框（3）
+
+| 工具名称 | 资源风险 | 外设风险 | 默认隐藏状态 |
+|---|---|---|---|
+| dlqq_dialog_text | 无危 | 无危 | 完全访问 |
+| dlqq_dialog_check | 无危 | 无危 | 完全访问 |
+| dlqq_dialog_file_path | 无危 | 无危 | 完全访问 |
+
+#### 4.12 图片 / Office 格式转换（3）
+
+| 工具名称 | 资源风险 | 外设风险 | 默认隐藏状态 |
+|---|---|---|---|
+| dlqq_convert_image | 风险 | 无危 | 完全访问 |
+| dlqq_read_office_file | 风险 | 无危 | 完全访问 |
+| dlqq_convert_office_file | 风险 | 无危 | 完全访问 |
+
+#### 4.13 时间与计算器（4）
+
+| 工具名称 | 资源风险 | 外设风险 | 默认隐藏状态 |
+|---|---|---|---|
+| dlqq_get_current_time | 无危 | 无危 | 完全访问 |
+| dlqq_calculator_math | 无危 | 无危 | 完全访问 |
+| dlqq_calculator_programmer | 无危 | 无危 | 完全访问 |
+| dlqq_calculator_function | 无危 | 无危 | 完全访问 |
+
+#### 4.14 MCP 管理与自省（14）
+
+| 工具名称 | 资源风险 | 外设风险 | 默认隐藏状态 |
+|---|---|---|---|
+| dlqq_get_mcp_version | 无危 | 无危 | 完全访问 |
+| dlqq_get_mcp_properties | 无危 | 无危 | 完全访问 |
+| dlqq_set_mcp_properties | 风险 | 无危 | 完全访问 |
+| dlqq_reset_mcp_properties | 风险 | 无危 | 完全访问 |
+| dlqq_mcp_hide_tools | 高危 | 无危 | 完全访问 |
+| dlqq_mcp_show_tools | 高危 | 无危 | 完全访问 |
+| dlqq_mcp_refresh_tools | 无危 | 无危 | 完全访问 |
+| dlqq_mcp_reset_tools | 高危 | 无危 | 完全访问 |
+| dlqq_mcp_run_tools | 高危 | 无危 | 完全访问 |
+| dlqq_clear_mcp_cache | 风险 | 无危 | 完全访问 |
+| dlqq_clear_mcp_data | 高危 | 无危 | 完全访问 |
+| dlqq_clear_mcp_log | 风险 | 无危 | 完全访问 |
+| dlqq_test_hot_reload | 无危 | 无危 | 源码屏蔽 |
+| dlqq_get_tool_list | 无危 | 无危 | 完全访问 |
+| dlqq_get_tools_env | 无危 | 无危 | 完全访问 |
+
+#### 4.15 工作区（5）
+
+| 工具名称 | 资源风险 | 外设风险 | 默认隐藏状态 |
+|---|---|---|---|
+| dlqq_workspace_set | 高危 | 无危 | 完全访问 |
+| dlqq_workspace_get | 无危 | 无危 | 完全访问 |
+| dlqq_workspace_reset | 高危 | 无危 | 完全访问 |
+| dlqq_workspace_permission_set | 高危 | 无危 | 完全访问 |
+| dlqq_get_cwd_path | 无危 | 无危 | 完全访问 |
+
+#### 4.16 项目脚本（执行，13）
+
+| 工具名称 | 资源风险 | 外设风险 | 默认隐藏状态 |
+|---|---|---|---|
+| dlqq_build_project | 高危 | 无危 | 源码屏蔽 |
+| dlqq_rebuild_project | 高危 | 无危 | 源码屏蔽 |
+| dlqq_run_project | 高危 | 无危 | 源码屏蔽 |
+| dlqq_debug_project | 高危 | 无危 | 源码屏蔽 |
+| dlqq_chip_erase | 高危 | 无危 | 源码屏蔽 |
+| dlqq_chip_download | 高危 | 无危 | 源码屏蔽 |
+| dlqq_erase_download | 高危 | 无危 | 源码屏蔽 |
+| dlqq_build_run_project | 高危 | 无危 | 源码屏蔽 |
+| dlqq_build_debug_project | 高危 | 无危 | 源码屏蔽 |
+| dlqq_build_erase_download | 高危 | 无危 | 源码屏蔽 |
+| dlqq_rebuild_run_project | 高危 | 无危 | 源码屏蔽 |
+| dlqq_rebuild_debug_project | 高危 | 无危 | 源码屏蔽 |
+| dlqq_rebuild_erase_download | 高危 | 无危 | 源码屏蔽 |
+
+#### 4.17 项目脚本（路径设置，13）
+
+| 工具名称 | 资源风险 | 外设风险 | 默认隐藏状态 |
+|---|---|---|---|
+| dlqq_set_build_script | 风险 | 无危 | 源码屏蔽 |
+| dlqq_set_rebuild_script | 风险 | 无危 | 源码屏蔽 |
+| dlqq_set_run_script | 风险 | 无危 | 源码屏蔽 |
+| dlqq_set_debug_script | 风险 | 无危 | 源码屏蔽 |
+| dlqq_set_chip_erase_script | 风险 | 无危 | 源码屏蔽 |
+| dlqq_set_chip_download_script | 风险 | 无危 | 源码屏蔽 |
+| dlqq_set_erase_download_script | 风险 | 无危 | 源码屏蔽 |
+| dlqq_set_build_run_script | 风险 | 无危 | 源码屏蔽 |
+| dlqq_set_build_debug_script | 风险 | 无危 | 源码屏蔽 |
+| dlqq_set_build_erase_download_script | 风险 | 无危 | 源码屏蔽 |
+| dlqq_set_rebuild_run_script | 风险 | 无危 | 源码屏蔽 |
+| dlqq_set_rebuild_debug_script | 风险 | 无危 | 源码屏蔽 |
+| dlqq_set_rebuild_erase_download_script | 风险 | 无危 | 源码屏蔽 |
 
 ## 许可证
 

@@ -16,16 +16,29 @@ import org.apache.commons.compress.archivers.sevenz.SevenZArchiveEntry;
 import org.apache.commons.compress.archivers.sevenz.SevenZFile;
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream;
+import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream;
 import org.apache.commons.compress.compressors.bzip2.BZip2CompressorInputStream;
 import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream;
 import org.apache.commons.compress.compressors.xz.XZCompressorInputStream;
 import org.apache.commons.compress.utils.IOUtils;
+import com.github.luben.zstd.ZstdInputStream;
+import com.github.luben.zstd.ZstdOutputStream;
+import com.google.gson.Gson;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import com.google.gson.stream.JsonReader;
 
 import java.io.BufferedInputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.RandomAccessFile;
+import java.io.StringReader;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -40,12 +53,16 @@ import java.util.stream.Collectors;
  */
 public class ZipTools {
 
+    /** Gson 实例（用于 asar 索引的解析与序列化） */
+    private static final Gson GSON = new Gson();
+
     /**
      * 支持的压缩格式（解压）
      */
     public static final List<String> SUPPORTED_FORMATS = Arrays.asList(
         "zip", "jar", "war", "ear", "7z", "tar", "tar.gz", "tgz", "tar.bz2", "tbz2",
-        "tar.xz", "txz", "gz", "bz2", "xz", "rar", "cpio", "ar"
+        "tar.xz", "txz", "gz", "bz2", "xz", "zstd", "zst", "tar.zst", "tzst",
+        "asar", "rar", "cpio", "ar"
     );
 
     /**
@@ -79,8 +96,15 @@ public class ZipTools {
             format = "zip";
         }
         format = format.toLowerCase().trim();
+        if ("zstd".equals(format) || "zst".equals(format)
+                || "tar.zst".equals(format) || "tzst".equals(format)) {
+            return zipToZstd(sourceFiles, outputPath, format, compressionLevel);
+        }
+        if ("asar".equals(format)) {
+            return zipToAsar(sourceFiles, outputPath);
+        }
         if (!"zip".equals(format)) {
-            throw new IOException("压缩功能目前仅支持 zip 格式（解压支持 " + getSupportedFormats() + "）");
+            throw new IOException("压缩支持 zip 与 zstd（单文件生成 .zst，多文件/目录生成 .tar.zst）");
         }
 
         // 确定输出路径
@@ -165,6 +189,77 @@ public class ZipTools {
     }
 
     /**
+     * 压缩为 zstd：单个普通文件生成 .zst；目录或多个源先打 tar 再压成 .tar.zst。
+     */
+    private static Map<String, Object> zipToZstd(List<File> sourceFiles, String outputPath,
+                                                 String format, Integer compressionLevel) throws IOException {
+        int level = compressionLevel == null ? 5 : Math.max(1, Math.min(9, compressionLevel));
+        boolean plainFile = sourceFiles.size() == 1 && sourceFiles.get(0).isFile();
+        boolean wantTar = "tar.zst".equals(format) || "tzst".equals(format) || !plainFile;
+
+        Path target;
+        if (outputPath != null && !outputPath.trim().isEmpty()) {
+            target = Workspace.resolve(FileUtils.normalizePath(outputPath));
+            String permissionError = FileTools.checkWritePermission(target.toString(), "zstd 压缩输出");
+            if (permissionError != null) {
+                throw new IOException(permissionError);
+            }
+        } else {
+            Path cacheDir = McpTools.ensureCacheDir();
+            File first = sourceFiles.get(0);
+            target = cacheDir.resolve(first.getName() + (wantTar ? ".tar.zst" : ".zst"));
+        }
+        if (target.getParent() != null) {
+            Files.createDirectories(target.getParent());
+        }
+
+        try (OutputStream fileOut = Files.newOutputStream(target)) {
+            if (wantTar) {
+                try (ZstdOutputStream zout = new ZstdOutputStream(fileOut, level);
+                     TarArchiveOutputStream tarOut = new TarArchiveOutputStream(zout)) {
+                    tarOut.setLongFileMode(TarArchiveOutputStream.LONGFILE_POSIX);
+                    for (File source : sourceFiles) {
+                        addToTar(tarOut, source, source.getName());
+                    }
+                    tarOut.finish();
+                }
+            } else {
+                try (ZstdOutputStream zout = new ZstdOutputStream(fileOut, level);
+                     InputStream in = Files.newInputStream(sourceFiles.get(0).toPath())) {
+                    IOUtils.copy(in, zout);
+                }
+            }
+        }
+
+        return Map.of(
+            "format", wantTar ? "tar.zst" : "zstd",
+            "outputPath", target.toString(),
+            "sourceCount", sourceFiles.size(),
+            "compressedSize", Files.size(target)
+        );
+    }
+
+    /** 把文件或目录递归写入 tar 流 */
+    private static void addToTar(TarArchiveOutputStream tarOut, File file, String entryName) throws IOException {
+        if (file.isDirectory()) {
+            String dirName = entryName.endsWith("/") ? entryName : entryName + "/";
+            tarOut.putArchiveEntry(new TarArchiveEntry(file, dirName));
+            tarOut.closeArchiveEntry();
+            File[] children = file.listFiles();
+            if (children != null) {
+                for (File child : children) {
+                    addToTar(tarOut, child, dirName + child.getName());
+                }
+            }
+        } else {
+            tarOut.putArchiveEntry(new TarArchiveEntry(file, entryName));
+            try (InputStream in = Files.newInputStream(file.toPath())) {
+                IOUtils.copy(in, tarOut);
+            }
+            tarOut.closeArchiveEntry();
+        }
+    }
+    /**
      * 解压缩文件（支持多种格式：zip/7z/tar/gz/bz2/xz/rar等）
      * @param zipPath 压缩文件路径
      * @param outputDir 输出目录（可选，默认为压缩文件所在目录下的同名文件夹）
@@ -172,6 +267,19 @@ public class ZipTools {
      * @return 包含操作结果的信息
      */
     public static Map<String, Object> unzipFile(String zipPath, String outputDir, String password) throws IOException {
+        return unzipFile(zipPath, outputDir, password, 0);
+    }
+
+    /**
+     * 解压压缩文件。
+     *
+     * @param detectMode 格式判定模式：
+     *                   0 = 严格按后缀名（后缀不支持直接报错；实际格式与后缀不符则报错）
+     *                   1 = 先按后缀名，不符或无法识别时探测真实格式
+     *                   2 = 忽略后缀名，只按文件内容探测，探测不出则报错
+     */
+    public static Map<String, Object> unzipFile(String zipPath, String outputDir, String password,
+                                                int detectMode) throws IOException {
         if (zipPath == null || zipPath.trim().isEmpty()) {
             throw new IOException("压缩文件路径不能为空");
         }
@@ -188,12 +296,9 @@ public class ZipTools {
             throw new IOException("路径不是文件: " + zipPath);
         }
 
-        // 检查文件扩展名
+        // 按 detectMode 解析格式
         String fileName = zipFilePath.getFileName().toString().toLowerCase();
-        String ext = getArchiveExt(fileName);
-        if (ext == null) {
-            throw new IOException("不支持的文件格式: " + fileName + "，支持的格式: " + getSupportedFormats());
-        }
+        String ext = resolveArchiveFormat(zipFilePath, fileName, detectMode);
 
         // 确定输出目录
         Path outputPath;
@@ -239,6 +344,101 @@ public class ZipTools {
             "files", fileList.subList(0, Math.min(fileList.size(), 20)), // 最多显示20个文件
             "hasMoreFiles", fileList.size() > 20
         );
+    }
+    /**
+     * 按 detectMode 解析压缩格式。
+     */
+    private static String resolveArchiveFormat(Path file, String fileName, int detectMode) throws IOException {
+        String ext = getArchiveExt(fileName);
+        String detected = detectFormatByMagic(file);
+        if (detectMode == 0) {
+            if (ext == null) {
+                throw new IOException("不支持的文件格式: " + fileName + "，支持的格式: " + getSupportedFormats());
+            }
+            if (detected != null && !familyMatches(ext, detected)) {
+                throw new IOException("文件实际格式为 " + detected + "，与后缀不匹配: " + fileName
+                        + "（确认无误时可改用 detect_mode=1 或 2）");
+            }
+            return ext;
+        }
+        if (detectMode == 2) {
+            if (detected == null) {
+                throw new IOException("无法根据文件内容判断压缩格式: " + fileName);
+            }
+            return mapDetectedToExt(detected);
+        }
+        // detectMode == 1：先信后缀，不符或识别不出时用探测结果
+        if (ext != null && (detected == null || familyMatches(ext, detected))) {
+            return ext;
+        }
+        if (detected != null) {
+            return mapDetectedToExt(detected);
+        }
+        if (ext != null) {
+            return ext;
+        }
+        throw new IOException("无法判断压缩格式: " + fileName);
+    }
+
+    /** 探测出的裸格式映射为解压用的格式名 */
+    private static String mapDetectedToExt(String detected) {
+        return detected;
+    }
+
+    /** 后缀格式与探测格式是否属于同一族（如 tar.gz 与 gz） */
+    private static boolean familyMatches(String ext, String detected) {
+        String base = ext.startsWith("tar.") ? ext.substring(4) : ext;
+        if ("tgz".equals(base)) base = "gz";
+        if ("tbz2".equals(base) || "tbz".equals(base)) base = "bz2";
+        if ("txz".equals(base)) base = "xz";
+        if ("tzst".equals(base) || "zst".equals(base)) base = "zstd";
+        return base.equals(detected);
+    }
+
+    /**
+     * 通过文件头魔数判断压缩格式，无法判断时返回 null。
+     */
+    private static String detectFormatByMagic(Path file) {
+        try (InputStream in = Files.newInputStream(file)) {
+            byte[] head = new byte[512];
+            int read = in.readNBytes(head, 0, head.length);
+            if (read < 4) {
+                return null;
+            }
+            if ((head[0] & 0xFF) == 0x50 && (head[1] & 0xFF) == 0x4B
+                    && ((head[2] & 0xFF) == 0x03 || (head[2] & 0xFF) == 0x05 || (head[2] & 0xFF) == 0x07)) {
+                return "zip";
+            }
+            if ((head[0] & 0xFF) == 0x1F && (head[1] & 0xFF) == 0x8B) {
+                return "gz";
+            }
+            if (head[0] == 'B' && head[1] == 'Z' && head[2] == 'h') {
+                return "bz2";
+            }
+            if (read >= 6 && (head[0] & 0xFF) == 0xFD && head[1] == '7' && head[2] == 'z'
+                    && head[3] == 'X' && head[4] == 'Z' && head[5] == 0x00) {
+                return "xz";
+            }
+            if ((head[0] & 0xFF) == 0x28 && (head[1] & 0xFF) == 0xB5
+                    && (head[2] & 0xFF) == 0x2F && (head[3] & 0xFF) == 0xFD) {
+                return "zstd";
+            }
+            if (read >= 6 && (head[0] & 0xFF) == 0x37 && head[1] == 'z' && (head[2] & 0xFF) == 0xBC
+                    && (head[3] & 0xFF) == 0xAF && head[4] == 0x27 && head[5] == 0x1C) {
+                return "7z";
+            }
+            if (read >= 7 && head[0] == 'R' && head[1] == 'a' && head[2] == 'r'
+                    && head[3] == '!' && head[4] == 0x1A && head[5] == 0x07) {
+                return "rar";
+            }
+            if (read >= 262 && head[257] == 'u' && head[258] == 's' && head[259] == 't'
+                    && head[260] == 'a' && head[261] == 'r') {
+                return "tar";
+            }
+            return null;
+        } catch (IOException e) {
+            return null;
+        }
     }
 
     /**
@@ -347,7 +547,9 @@ public class ZipTools {
             switch (ext) {
                 case "gz":
                 case "bz2":
-                case "xz": {
+                case "xz":
+                case "zstd":
+                case "zst": {
                     // 单文件压缩（无归档结构）
                     InputStream comp = createCompressorStream(rawIn, ext);
                     String outName = stripLastExtension(archivePath.getFileName().toString());
@@ -364,7 +566,9 @@ public class ZipTools {
                 case "tbz2":
                 case "tbz":
                 case "tar.xz":
-                case "txz": {
+                case "txz":
+                case "tar.zst":
+                case "tzst": {
                     // tar + 压缩
                     InputStream comp = createCompressorStream(rawIn, ext);
                     extractTarEntries(comp, outputPath, fileList);
@@ -372,6 +576,11 @@ public class ZipTools {
                 }
                 case "tar": {
                     extractTarEntries(rawIn, outputPath, fileList);
+                    break;
+                }
+                case "asar": {
+                    // asar 是 Electron 归档（非压缩），需按索引偏移随机读取
+                    extractAsar(archivePath, outputPath, fileList);
                     break;
                 }
                 case "7z": {
@@ -411,6 +620,11 @@ public class ZipTools {
             case "tar.xz":
             case "txz":
                 return new XZCompressorInputStream(in);
+            case "zstd":
+            case "zst":
+            case "tar.zst":
+            case "tzst":
+                return new ZstdInputStream(in);
             default:
                 return in;
         }
@@ -450,7 +664,7 @@ public class ZipTools {
     private static void extractTarEntries(InputStream in, Path outputPath, List<String> fileList) throws IOException {
         try (TarArchiveInputStream tis = new TarArchiveInputStream(in)) {
             TarArchiveEntry entry;
-            while ((entry = tis.getNextTarEntry()) != null) {
+            while ((entry = tis.getNextEntry()) != null) {
                 if (entry.isDirectory()) {
                     continue;
                 }
@@ -592,7 +806,7 @@ public class ZipTools {
         long totalSize = 0;
         try (TarArchiveInputStream tis = new TarArchiveInputStream(in)) {
             TarArchiveEntry entry;
-            while ((entry = tis.getNextTarEntry()) != null) {
+            while ((entry = tis.getNextEntry()) != null) {
                 Map<String, Object> m = new LinkedHashMap<>();
                 m.put("name", entry.getName());
                 m.put("size", entry.getSize());
@@ -624,6 +838,7 @@ public class ZipTools {
         if (fileName.endsWith(".tar.gz") || fileName.endsWith(".tgz")) return "tar.gz";
         if (fileName.endsWith(".tar.bz2") || fileName.endsWith(".tbz2") || fileName.endsWith(".tbz")) return "tar.bz2";
         if (fileName.endsWith(".tar.xz") || fileName.endsWith(".txz")) return "tar.xz";
+        if (fileName.endsWith(".tar.zst") || fileName.endsWith(".tzst")) return "tar.zst";
         if (fileName.endsWith(".tar")) return "tar";
         if (fileName.endsWith(".zip")) return "zip";
         if (fileName.endsWith(".jar") || fileName.endsWith(".war") || fileName.endsWith(".ear")) return "zip";
@@ -631,6 +846,8 @@ public class ZipTools {
         if (fileName.endsWith(".gz")) return "gz";
         if (fileName.endsWith(".bz2")) return "bz2";
         if (fileName.endsWith(".xz")) return "xz";
+        if (fileName.endsWith(".zstd") || fileName.endsWith(".zst")) return "zstd";
+        if (fileName.endsWith(".asar")) return "asar";
         if (fileName.endsWith(".rar")) return "rar";
         if (fileName.endsWith(".cpio")) return "cpio";
         if (fileName.endsWith(".ar")) return "ar";
@@ -641,8 +858,9 @@ public class ZipTools {
      * 去掉归档扩展名得到默认输出目录名
      */
     private static String stripArchiveExt(String fileName) {
-        String[] suffixes = {".tar.gz", ".tar.bz2", ".tar.xz", ".tar", ".zip", ".jar", ".war", ".ear",
-                             ".7z", ".gz", ".bz2", ".xz", ".rar", ".cpio", ".ar", ".tgz", ".tbz2", ".tbz", ".txz"};
+        String[] suffixes = {".tar.gz", ".tar.bz2", ".tar.xz", ".tar.zst", ".tar", ".zip", ".jar", ".war", ".ear",
+                             ".7z", ".gz", ".bz2", ".xz", ".zstd", ".zst", ".asar", ".rar", ".cpio", ".ar",
+                             ".tgz", ".tbz2", ".tbz", ".txz", ".tzst"};
         for (String suffix : suffixes) {
             if (fileName.endsWith(suffix)) {
                 return fileName.substring(0, fileName.length() - suffix.length());
@@ -698,5 +916,201 @@ public class ZipTools {
      */
     public static String getSupportedFormats() {
         return String.join(", ", SUPPORTED_FORMATS);
+    }
+
+    // ==================== ASAR（Electron 归档） ====================
+
+    /** asar 数据区起始偏移 = 8 + headerSize */
+    private static long asarDataOffset(int headerSize) {
+        return 8L + headerSize;
+    }
+
+    /**
+     * 解压 asar 归档（Electron 打包格式，非压缩容器）。
+     */
+    private static List<String> extractAsar(Path archivePath, Path outputPath, List<String> fileList) throws IOException {
+        try (RandomAccessFile raf = new RandomAccessFile(archivePath.toFile(), "r")) {
+            // 头部布局：[uint32 4][uint32 headerSize][...][json...]
+            // 不依赖固定偏移：直接在头部查找 JSON 的起始 '{'
+            byte[] head = new byte[64];
+            raf.readFully(head);
+            int headLen = head.length;
+            ByteBuffer buf = ByteBuffer.wrap(head, 0, headLen).order(ByteOrder.LITTLE_ENDIAN);
+            buf.getInt();
+            int headerSize = buf.getInt();
+            if (headerSize <= 0 || headerSize > 256 * 1024 * 1024) {
+                throw new IOException("asar 头部异常: headerSize=" + headerSize);
+            }
+            int jsonStart = -1;
+            for (int i = 8; i < headLen; i++) {
+                if (head[i] == '{') {
+                    jsonStart = i;
+                    break;
+                }
+            }
+            if (jsonStart < 0) {
+                throw new IOException("asar 索引起始位置未找到");
+            }
+            long dataOffset = asarDataOffset(headerSize);
+            long jsonLength = dataOffset - jsonStart;
+            if (jsonLength <= 0 || jsonLength > 256L * 1024 * 1024) {
+                throw new IOException("asar 索引长度异常: " + jsonLength);
+            }
+            raf.seek(jsonStart);
+            byte[] jsonBytes = new byte[(int) jsonLength];
+            raf.readFully(jsonBytes);
+            String json = new String(jsonBytes, StandardCharsets.UTF_8);
+            JsonObject root;
+            try {
+                JsonReader reader = new JsonReader(new StringReader(json));
+                reader.setLenient(true);
+                root = JsonParser.parseReader(reader).getAsJsonObject();
+            } catch (Exception e) {
+                String preview = json.length() > 64 ? json.substring(0, 64) : json;
+                throw new IOException("asar 索引解析失败: " + e.getMessage() + "，前 64 字符: " + preview);
+            }
+            JsonObject files = root.getAsJsonObject("files");
+            if (files != null) {
+                asarWalk(raf, files, "", outputPath, dataOffset, fileList);
+            }
+        }
+        return fileList;
+    }
+
+    /** 递归遍历 asar 索引树并抽取文件 */
+    private static void asarWalk(RandomAccessFile raf, JsonObject node, String prefix, Path outputPath,
+                                 long dataOffset, List<String> fileList) throws IOException {
+        for (Map.Entry<String, JsonElement> entry : node.entrySet()) {
+            String name = entry.getKey();
+            JsonObject item = entry.getValue().getAsJsonObject();
+            String entryPath = prefix.isEmpty() ? name : prefix + "/" + name;
+            if (item.has("files")) {
+                asarWalk(raf, item.getAsJsonObject("files"), entryPath, outputPath, dataOffset, fileList);
+                continue;
+            }
+            if (!item.has("offset")) {
+                continue;
+            }
+            long offset = Long.parseLong(item.get("offset").getAsString());
+            long size = item.get("size").getAsLong();
+            Path target = outputPath.resolve(entryPath).normalize();
+            if (!target.startsWith(outputPath)) {
+                continue;
+            }
+            if (target.getParent() != null) {
+                Files.createDirectories(target.getParent());
+            }
+            raf.seek(dataOffset + offset);
+            try (OutputStream out = Files.newOutputStream(target)) {
+                byte[] buffer = new byte[64 * 1024];
+                long remain = size;
+                while (remain > 0) {
+                    int read = raf.read(buffer, 0, (int) Math.min(buffer.length, remain));
+                    if (read < 0) {
+                        break;
+                    }
+                    out.write(buffer, 0, read);
+                    remain -= read;
+                }
+            }
+            fileList.add(entryPath);
+        }
+    }
+
+    /**
+     * 打包为 asar：目录或多个源合并为一棵树，单文件作为根条目。
+     */
+    private static Map<String, Object> zipToAsar(List<File> sources, String outputPath) throws IOException {
+        Path target;
+        if (outputPath != null && !outputPath.trim().isEmpty()) {
+            target = Workspace.resolve(FileUtils.normalizePath(outputPath));
+            String permissionError = FileTools.checkWritePermission(target.toString(), "asar 打包输出");
+            if (permissionError != null) {
+                throw new IOException(permissionError);
+            }
+        } else {
+            Path cacheDir = McpTools.ensureCacheDir();
+            target = cacheDir.resolve(sources.get(0).getName() + ".asar");
+        }
+        if (target.getParent() != null) {
+            Files.createDirectories(target.getParent());
+        }
+
+        LinkedHashMap<String, File> entries = new LinkedHashMap<>();
+        for (File source : sources) {
+            collectAsarEntries(source, source.getName(), entries);
+        }
+
+        // 先算偏移（累计大小），再序列化索引，最后写头 + 数据
+        LinkedHashMap<String, Long> offsets = new LinkedHashMap<>();
+        long cursor = 0;
+        for (Map.Entry<String, File> entry : entries.entrySet()) {
+            offsets.put(entry.getKey(), cursor);
+            cursor += entry.getValue().length();
+        }
+
+        JsonObject rootFiles = new JsonObject();
+        for (Map.Entry<String, File> entry : entries.entrySet()) {
+            String[] parts = entry.getKey().split("/");
+            JsonObject parent = rootFiles;
+            for (int i = 0; i < parts.length - 1; i++) {
+                JsonObject child = parent.getAsJsonObject(parts[i]);
+                if (child == null) {
+                    child = new JsonObject();
+                    child.add("files", new JsonObject());
+                    parent.add(parts[i], child);
+                }
+                parent = child.getAsJsonObject("files");
+            }
+            JsonObject fileNode = new JsonObject();
+            fileNode.addProperty("size", entry.getValue().length());
+            fileNode.addProperty("offset", String.valueOf(offsets.get(entry.getKey())));
+            parent.add(parts[parts.length - 1], fileNode);
+        }
+        JsonObject root = new JsonObject();
+        root.add("files", rootFiles);
+
+        byte[] jsonBytes = GSON.toJson(root).getBytes(StandardCharsets.UTF_8);
+        int headerSize = jsonBytes.length + 4;
+        ByteBuffer header = ByteBuffer.allocate(8 + headerSize).order(ByteOrder.LITTLE_ENDIAN);
+        header.putInt(4);
+        header.putInt(headerSize);
+        header.putInt(jsonBytes.length);
+        header.put(jsonBytes);
+
+        try (OutputStream out = Files.newOutputStream(target)) {
+            out.write(header.array());
+            byte[] buffer = new byte[64 * 1024];
+            for (File file : entries.values()) {
+                try (InputStream in = Files.newInputStream(file.toPath())) {
+                    int read;
+                    while ((read = in.read(buffer)) > 0) {
+                        out.write(buffer, 0, read);
+                    }
+                }
+            }
+        }
+
+        return Map.of(
+            "format", "asar",
+            "outputPath", target.toString(),
+            "sourceCount", sources.size(),
+            "fileCount", entries.size(),
+            "compressedSize", Files.size(target)
+        );
+    }
+
+    /** 递归收集 asar 条目（路径 → 文件） */
+    private static void collectAsarEntries(File file, String entryPath, Map<String, File> out) {
+        if (file.isDirectory()) {
+            File[] children = file.listFiles();
+            if (children != null) {
+                for (File child : children) {
+                    collectAsarEntries(child, entryPath + "/" + child.getName(), out);
+                }
+            }
+        } else {
+            out.put(entryPath, file);
+        }
     }
 }

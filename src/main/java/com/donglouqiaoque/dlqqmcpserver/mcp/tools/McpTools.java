@@ -775,14 +775,14 @@ public class McpTools {
         return result.toString();
     }
 
-    /**
-     * 设置构建脚本路径
-     * @param scriptPath 脚本路径
-     * @return 设置结果
-     */
+    /*
+     * 【已屏蔽】设置构建脚本路径（配套 dlqq_set_build_script）
+     * 保留代码以备恢复；启用时与 AITools 中对应注册行一起放开。
+     *
     public static String setBuildScript(String scriptPath) {
         return setScriptInSettings("script.build", scriptPath, "构建项目");
     }
+     */
 
     /**
      * 设置重建脚本路径

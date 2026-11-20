@@ -1,18 +1,26 @@
 package com.donglouqiaoque.dlqqmcpserver.mcp.server;
 
+import com.donglouqiaoque.dlqqmcpserver.mcp.policy.ApprovalPrompt;
+import com.donglouqiaoque.dlqqmcpserver.mcp.policy.ToolApprovals;
+import com.donglouqiaoque.dlqqmcpserver.mcp.policy.ToolPolicy;
+import com.donglouqiaoque.dlqqmcpserver.mcp.policy.ToolTimeoutContext;
 import com.donglouqiaoque.dlqqmcpserver.mcp.protocol.JsonRpcMessage;
 import com.donglouqiaoque.dlqqmcpserver.mcp.protocol.McpSchema.*;
+import com.donglouqiaoque.dlqqmcpserver.mcp.tools.DialogTools;
 import com.donglouqiaoque.dlqqmcpserver.mcp.transport.McpTransport;
+import com.donglouqiaoque.dlqqmcpserver.utils.SessionScope;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.function.Function;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -196,6 +204,23 @@ public class McpServer {
     }
 
     /**
+     * 恢复指定被移除的工具（dlqq_mcp_show_tools 使用）。
+     *
+     * @param names 要恢复的工具名
+     * @return 实际恢复的工具名
+     */
+    public List<String> enableTools(List<String> names) {
+        List<String> restored = new ArrayList<>();
+        for (String name : names) {
+            if (disabledTools.remove(name)) {
+                restored.add(name);
+            }
+        }
+        logger.info("[McpServer] Restored tools: {}", restored);
+        return restored;
+    }
+
+    /**
      * 指定工具当前是否被移除。
      */
     public boolean isToolDisabled(String name) {
@@ -295,68 +320,74 @@ public class McpServer {
      */
     private void handleMessage(JsonRpcMessage.Request request) {
         String method = request.getMethod();
-        onClientActivity(method);
-        logger.info("[McpServer.handleMessage] Received request: method={}, id={}, isNotification={}",
-                method, request.getId(), request.isNotification());
-
+        // 会话绑定：单进程多会话隔离的统一入口（stdio / http 由传输层解析出 sessionId）
+        String previousSession = SessionScope.enter(request.getSessionId());
         try {
-            // 检查是否是通知（notification）- id为null
-            boolean isNotification = request.isNotification();
+            onClientActivity(method);
+            logger.info("[McpServer.handleMessage] Received request: method={}, id={}, session={}, isNotification={}",
+                    method, request.getId(), SessionScope.currentSessionId(), request.isNotification());
 
-            switch (method) {
-                case "initialize":
-                    logger.info("[McpServer.handleMessage] Handling initialize request");
-                    handleInitialize(request);
-                    break;
-                case "initialized":
-                case "notifications/initialized":
-                    // 客户端确认初始化完成 - 这是通知，不返回响应
-                    logger.info("[McpServer.handleMessage] Handling initialized notification");
-                    handleInitialized(request);
-                    break;
-                case "tools/list":
-                    logger.info("[McpServer.handleMessage] Handling tools/list request");
-                    handleToolsList(request);
-                    break;
-                case "tools/call":
-                    logger.info("[McpServer.handleMessage] Handling tools/call request");
-                    handleToolsCall(request);
-                    break;
-                case "resources/list":
-                    logger.info("[McpServer.handleMessage] Handling resources/list request");
-                    handleResourcesList(request);
-                    break;
-                case "prompts/list":
-                    logger.info("[McpServer.handleMessage] Handling prompts/list request");
-                    handlePromptsList(request);
-                    break;
-                case "prompts/get":
-                    logger.info("[McpServer.handleMessage] Handling prompts/get request");
-                    handlePromptsGet(request);
-                    break;
-                default:
-                    // 对于通知，不发送错误响应
-                    if (!isNotification) {
-                        logger.warn("[McpServer.handleMessage] Unknown method: {}", method);
-                        sendErrorResponse(request.getId(), JsonRpcMessage.ERROR_METHOD_NOT_FOUND,
-                                "Unknown method: " + method);
-                    } else {
-                        logger.warn("[McpServer.handleMessage] Ignoring unknown notification: {}", method);
-                    }
-            }
-        } catch (Exception e) {
-            logger.error("[McpServer.handleMessage] Error handling request: method={}, error={}", method, e.getMessage(), e);
             try {
-                // 对于通知，不发送错误响应
-                if (request.getId() != null) {
-                    sendErrorResponse(request.getId(), JsonRpcMessage.ERROR_INTERNAL_ERROR,
-                            "Internal error: " + e.getMessage());
-                } else {
-                    logger.error("[McpServer.handleMessage] Error handling notification: {}", e.getMessage(), e);
+                // 检查是否是通知（notification）- id为null
+                boolean isNotification = request.isNotification();
+
+                switch (method) {
+                    case "initialize":
+                        logger.info("[McpServer.handleMessage] Handling initialize request");
+                        handleInitialize(request);
+                        break;
+                    case "initialized":
+                    case "notifications/initialized":
+                        // 客户端确认初始化完成 - 这是通知，不返回响应
+                        logger.info("[McpServer.handleMessage] Handling initialized notification");
+                        handleInitialized(request);
+                        break;
+                    case "tools/list":
+                        logger.info("[McpServer.handleMessage] Handling tools/list request");
+                        handleToolsList(request);
+                        break;
+                    case "tools/call":
+                        logger.info("[McpServer.handleMessage] Handling tools/call request");
+                        handleToolsCall(request);
+                        break;
+                    case "resources/list":
+                        logger.info("[McpServer.handleMessage] Handling resources/list request");
+                        handleResourcesList(request);
+                        break;
+                    case "prompts/list":
+                        logger.info("[McpServer.handleMessage] Handling prompts/list request");
+                        handlePromptsList(request);
+                        break;
+                    case "prompts/get":
+                        logger.info("[McpServer.handleMessage] Handling prompts/get request");
+                        handlePromptsGet(request);
+                        break;
+                    default:
+                        // 对于通知，不发送错误响应
+                        if (!isNotification) {
+                            logger.warn("[McpServer.handleMessage] Unknown method: {}", method);
+                            sendErrorResponse(request.getId(), JsonRpcMessage.ERROR_METHOD_NOT_FOUND,
+                                    "Unknown method: " + method);
+                        } else {
+                            logger.warn("[McpServer.handleMessage] Ignoring unknown notification: {}", method);
+                        }
                 }
-            } catch (IOException ioException) {
-                logger.error("[McpServer.handleMessage] Failed to send error response: {}", ioException.getMessage(), ioException);
+            } catch (Exception e) {
+                logger.error("[McpServer.handleMessage] Error handling request: method={}, error={}", method, e.getMessage(), e);
+                try {
+                    // 对于通知，不发送错误响应
+                    if (request.getId() != null) {
+                        sendErrorResponse(request.getId(), JsonRpcMessage.ERROR_INTERNAL_ERROR,
+                                "Internal error: " + e.getMessage());
+                    } else {
+                        logger.error("[McpServer.handleMessage] Error handling notification: {}", e.getMessage(), e);
+                    }
+                } catch (IOException ioException) {
+                    logger.error("[McpServer.handleMessage] Failed to send error response: {}", ioException.getMessage(), ioException);
+                }
             }
+        } finally {
+            SessionScope.exit(previousSession);
         }
     }
 
@@ -465,8 +496,91 @@ public class McpServer {
             return;
         }
 
+        // 权限策略校验：按风险等级与 AI 权限等级决定 允许 / 需要批准 / 拒绝
+        ToolPolicy.Result policyResult = ToolPolicy.decide(toolName, arguments);
+        if (policyResult.decision() == ToolPolicy.Decision.DENY) {
+            CallToolResult denied = new CallToolResult();
+            denied.setError(true);
+            List<ToolContent> content = new ArrayList<>();
+            content.add(ToolContent.error("✗ 权限拒绝：" + policyResult.message()));
+            denied.setContent(content);
+            sendResponse(request.getId(), denied);
+            return;
+        }
+        // 参数先校验：未知参数直接报错，不进入审批（避免“批准后才发现参数错误”）
+        String argumentError = validateUnknownArguments(handler, arguments);
+        if (argumentError != null) {
+            CallToolResult invalid = new CallToolResult();
+            invalid.setError(true);
+            List<ToolContent> content = new ArrayList<>();
+            content.add(ToolContent.error(argumentError));
+            invalid.setContent(content);
+            sendResponse(request.getId(), invalid);
+            return;
+        }
+
+        // 工具总超时 = 审批时间 + 运行时间，默认 50 秒；后台进程（no_wait）立即返回，不受限。
+        int timeoutSeconds = resolveToolTimeoutSeconds(params, arguments);
+        boolean background = isBackgroundCall(arguments);
+        ToolTimeoutContext.begin(timeoutSeconds);
         try {
-            CallToolResult result = handler.call(arguments);
+            // 需要用户批准：弹出该工具专属审批窗口（内置窗口工具跳过，避免重复批准）
+            if (policyResult.decision() == ToolPolicy.Decision.APPROVE
+                    && !ToolApprovals.confirm(toolName, arguments)) {
+                CallToolResult cancelled = new CallToolResult();
+                cancelled.setError(true);
+                List<ToolContent> content = new ArrayList<>();
+                content.add(ToolContent.error(ToolApprovals.cancelledMessage(toolName)));
+                cancelled.setContent(content);
+                sendResponse(request.getId(), cancelled);
+                return;
+            }
+            int remainingSeconds = background ? timeoutSeconds : ToolTimeoutContext.remainingSeconds();
+            if (!background && remainingSeconds <= 0) {
+                DialogTools.closeApprovalWindow();
+                CallToolResult timeoutResult = new CallToolResult();
+                timeoutResult.setError(true);
+                List<ToolContent> content = new ArrayList<>();
+                content.add(ToolContent.error("✗ 工具执行超时（总时限 " + timeoutSeconds
+                        + " 秒，含审批与运行时间），审批窗口已关闭，操作未执行"));
+                timeoutResult.setContent(content);
+                sendResponse(request.getId(), timeoutResult);
+                return;
+            }
+            CallToolResult result;
+            if (background) {
+                result = handler.call(arguments);
+            } else {
+                final int timeout = remainingSeconds;
+                // 关键：工具在子线程执行，必须把当前会话绑定带到子线程，
+                // 否则子线程里 SessionScope 为空 → 工作区回落到默认会话（进程 CWD），
+                // 导致工作区内路径被误判为工作区外、workspace_get 显示 __default__。
+                final String workerSessionId = request.getSessionId();
+                CompletableFuture<CallToolResult> future = CompletableFuture.supplyAsync(() -> {
+                    String previousSession = SessionScope.enter(workerSessionId);
+                    ToolTimeoutContext.begin(timeout);
+                    try {
+                        return handler.call(arguments);
+                    } finally {
+                        ToolTimeoutContext.clear();
+                        SessionScope.exit(previousSession);
+                    }
+                });
+                try {
+                    result = future.get(remainingSeconds, TimeUnit.SECONDS);
+                } catch (TimeoutException te) {
+                    future.cancel(true);
+                    DialogTools.closeApprovalWindow();
+                    CallToolResult timeoutResult = new CallToolResult();
+                    timeoutResult.setError(true);
+                    List<ToolContent> content = new ArrayList<>();
+                    content.add(ToolContent.error("✗ 工具执行超时（总时限 " + timeoutSeconds
+                            + " 秒，含审批与运行时间），已立即终止；审批窗口已关闭"));
+                    timeoutResult.setContent(content);
+                    sendResponse(request.getId(), timeoutResult);
+                    return;
+                }
+            }
             sendResponse(request.getId(), result);
         } catch (Exception e) {
             CallToolResult errorResult = new CallToolResult();
@@ -475,9 +589,73 @@ public class McpServer {
             content.add(ToolContent.error("Error: " + e.getMessage()));
             errorResult.setContent(content);
             sendResponse(request.getId(), errorResult);
+        } finally {
+            ToolTimeoutContext.clear();
         }
     }
 
+    /** 解析本次工具调用超时秒数：params._meta["dlqq/toolTimeoutSeconds"] 优先，默认 50 秒。 */
+    @SuppressWarnings("unchecked")
+    private int resolveToolTimeoutSeconds(Map<String, Object> params, Map<String, Object> arguments) {
+        Object metaRaw = params.get("_meta");
+        if (metaRaw instanceof Map<?, ?> meta) {
+            Object value = ((Map<String, Object>) meta).get("dlqq/toolTimeoutSeconds");
+            Integer seconds = parsePositiveInt(value);
+            if (seconds != null) {
+                return seconds;
+            }
+        }
+        if (arguments != null) {
+            Integer seconds = parsePositiveInt(arguments.get("tool_timeout_seconds"));
+            if (seconds != null) {
+                return seconds;
+            }
+        }
+        return ToolTimeoutContext.defaultTimeoutSeconds();
+    }
+
+    private Integer parsePositiveInt(Object value) {
+        if (value == null) {
+            return null;
+        }
+        try {
+            int parsed = Integer.parseInt(String.valueOf(value).trim());
+            return parsed > 0 ? parsed : null;
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    /** 后台进程类调用（no_wait=true）立即返回，不设总超时。 */
+    private boolean isBackgroundCall(Map<String, Object> arguments) {
+        if (arguments == null) {
+            return false;
+        }
+        Object noWait = arguments.get("no_wait");
+        if (noWait instanceof Boolean b) {
+            return b;
+        }
+        return noWait != null && "true".equalsIgnoreCase(String.valueOf(noWait).trim());
+    }
+
+    /** 校验工具参数：未知参数直接报错（在审批之前执行）。 */
+    private String validateUnknownArguments(ToolHandler handler, Map<String, Object> arguments) {
+        if (handler == null || arguments == null || arguments.isEmpty()) {
+            return null;
+        }
+        ToolInputSchema inputSchema = handler.getInputSchema();
+        if (inputSchema == null || inputSchema.getProperties() == null) {
+            return null;
+        }
+        Set<String> validParams = inputSchema.getProperties().keySet();
+        for (String key : arguments.keySet()) {
+            if (!validParams.contains(key) && !"tool_timeout_seconds".equals(key)) {
+                return "✗ 参数错误：未知参数 \"" + key + "\"（该工具支持的参数: "
+                        + String.join(", ", validParams) + "）";
+            }
+        }
+        return null;
+    }
     /**
      * 处理资源列表请求
      */
@@ -587,11 +765,29 @@ public class McpServer {
     }
 
     /**
+     * 文件编辑类工具：对能力较弱的模型统一附加"优先用 replace_text_in_file"的提示，
+     * 降低按行号/整段覆盖导致文件损坏的概率。
+     */
+    private static final Set<String> EDITING_TOOLS = Set.of(
+        "dlqq_create_file", "dlqq_overwrite_file", "dlqq_append_file", "dlqq_clear_file",
+        "dlqq_insert_text_in_file", "dlqq_replace_lines_in_file",
+        "dlqq_remove_lines_in_file", "dlqq_remove_text_in_file", "dlqq_write_bin_file",
+        "dlqq_add_unicode_bom", "dlqq_remove_unicode_bom");
+
+    /** 追加到编辑类工具描述末尾的提示语 */
+    private static final String EDITING_HINT =
+        "\n\n【弱模型提示】如果你的模型能力有限，建议只使用 dlqq_replace_text_in_file 修改文件内容，"
+        + "不要使用本工具或其他编辑工具，以免损坏用户文件。";
+
+    /**
      * 注册工具
      */
     public void addTool(String name, String description, ToolInputSchema inputSchema, 
                         Function<Map<String, Object>, CallToolResult> handler) {
-        toolHandlers.put(name, new ToolHandler(description, inputSchema, handler));
+        String finalDescription = EDITING_TOOLS.contains(name) && description != null
+            ? description + EDITING_HINT
+            : description;
+        toolHandlers.put(name, new ToolHandler(finalDescription, inputSchema, handler));
         capabilities.setTools(true);
     }
 

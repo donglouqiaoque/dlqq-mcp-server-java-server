@@ -922,6 +922,8 @@ public class UsbTools {
         guiWindow.setSize(900, 600);
         guiWindow.setLocationRelativeTo(null);
         guiWindow.setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
+        // 始终置顶，避免被后续弹窗或其它窗口遮挡
+        guiWindow.setAlwaysOnTop(true);
 
         // Set window icon
         LogoLoader.applyTo(guiWindow, "USB工具");

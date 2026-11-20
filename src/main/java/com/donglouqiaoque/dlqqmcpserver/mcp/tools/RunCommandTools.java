@@ -27,7 +27,11 @@ public class RunCommandTools {
     // 最大超时时间（秒）
     private static final int MAX_TIMEOUT = 600;
     // 确认框等待用户审批的超时时间（秒）：到点自动取消，不执行命令
-    private static final int APPROVAL_TIMEOUT_SECONDS = 60;
+    // 取 50 秒，确保早于 MCP 客户端默认的 60 秒工具超时，先返回明确的“用户未批准”
+    private static final int APPROVAL_TIMEOUT_SECONDS = 50;
+
+    /** 最近一次审批是否因倒计时结束（用户未点按钮）而失败 */
+    private static volatile boolean lastApprovalTimedOut = false;
 
     /** 用 cmd.exe /c 执行（包内可见：BackgroundPrograms 也需要用来区分 shell） */
     static final String SHELL_CMD = "cmd";
@@ -63,21 +67,21 @@ public class RunCommandTools {
     private static void registerBackgroundTools(McpServer server) {
         registerBackgroundTool(server, "dlqq_get_command_list", SHELL_CMD, "cmd", BackgroundAction.LIST);
         registerBackgroundTool(server, "dlqq_get_command_log", SHELL_CMD, "cmd", BackgroundAction.LOG);
-        registerBackgroundTool(server, "dlqq_get_command_kill", SHELL_CMD, "cmd", BackgroundAction.KILL);
-        registerBackgroundTool(server, "dlqq_get_command_clear", SHELL_CMD, "cmd", BackgroundAction.CLEAR);
-        registerBackgroundTool(server, "dlqq_get_command_refresh", SHELL_CMD, "cmd", BackgroundAction.REFRESH);
+        registerBackgroundTool(server, "dlqq_kill_command", SHELL_CMD, "cmd", BackgroundAction.KILL);
+        registerBackgroundTool(server, "dlqq_clear_command_list", SHELL_CMD, "cmd", BackgroundAction.CLEAR);
+        registerBackgroundTool(server, "dlqq_refresh_command_list", SHELL_CMD, "cmd", BackgroundAction.REFRESH);
 
         registerBackgroundTool(server, "dlqq_get_powershell_list", SHELL_POWERSHELL, "PowerShell 5.1", BackgroundAction.LIST);
         registerBackgroundTool(server, "dlqq_get_powershell_log", SHELL_POWERSHELL, "PowerShell 5.1", BackgroundAction.LOG);
-        registerBackgroundTool(server, "dlqq_get_powershell_kill", SHELL_POWERSHELL, "PowerShell 5.1", BackgroundAction.KILL);
-        registerBackgroundTool(server, "dlqq_get_powershell_clear", SHELL_POWERSHELL, "PowerShell 5.1", BackgroundAction.CLEAR);
-        registerBackgroundTool(server, "dlqq_get_powershell_refresh", SHELL_POWERSHELL, "PowerShell 5.1", BackgroundAction.REFRESH);
+        registerBackgroundTool(server, "dlqq_kill_powershell", SHELL_POWERSHELL, "PowerShell 5.1", BackgroundAction.KILL);
+        registerBackgroundTool(server, "dlqq_clear_powershell_list", SHELL_POWERSHELL, "PowerShell 5.1", BackgroundAction.CLEAR);
+        registerBackgroundTool(server, "dlqq_refresh_powershell_list", SHELL_POWERSHELL, "PowerShell 5.1", BackgroundAction.REFRESH);
 
         registerBackgroundTool(server, "dlqq_get_pwsh_list", SHELL_PWSH, "PowerShell 7", BackgroundAction.LIST);
         registerBackgroundTool(server, "dlqq_get_pwsh_log", SHELL_PWSH, "PowerShell 7", BackgroundAction.LOG);
-        registerBackgroundTool(server, "dlqq_get_pwsh_kill", SHELL_PWSH, "PowerShell 7", BackgroundAction.KILL);
-        registerBackgroundTool(server, "dlqq_get_pwsh_clear", SHELL_PWSH, "PowerShell 7", BackgroundAction.CLEAR);
-        registerBackgroundTool(server, "dlqq_get_pwsh_refresh", SHELL_PWSH, "PowerShell 7", BackgroundAction.REFRESH);
+        registerBackgroundTool(server, "dlqq_kill_pwsh", SHELL_PWSH, "PowerShell 7", BackgroundAction.KILL);
+        registerBackgroundTool(server, "dlqq_clear_pwsh_list", SHELL_PWSH, "PowerShell 7", BackgroundAction.CLEAR);
+        registerBackgroundTool(server, "dlqq_refresh_pwsh_list", SHELL_PWSH, "PowerShell 7", BackgroundAction.REFRESH);
     }
 
     /**
@@ -221,7 +225,9 @@ public class RunCommandTools {
                 boolean approved = showApprovalDialog(command, workingDir, timeout, noWait);
 
                 if (!approved) {
-                    return createErrorResult("用户取消了命令执行");
+                    return createErrorResult(lastApprovalTimedOut
+                            ? "用户超时未批准（审批倒计时 " + APPROVAL_TIMEOUT_SECONDS + " 秒内未点击），命令未执行"
+                            : "用户取消了命令执行");
                 }
 
                 // 执行命令（no_wait=true 时后台启动并立即返回）
@@ -305,7 +311,9 @@ public class RunCommandTools {
 
             boolean approved = showApprovalDialog(command, workingDir, timeout, noWait, shellLabel);
             if (!approved) {
-                return createErrorResult("用户取消了命令执行");
+                return createErrorResult(lastApprovalTimedOut
+                        ? "用户超时未批准（审批倒计时 " + APPROVAL_TIMEOUT_SECONDS + " 秒内未点击），命令未执行"
+                        : "用户取消了命令执行");
             }
             return executeCommand(command, workingDir, timeout, noWait, shell);
         });
@@ -322,6 +330,7 @@ public class RunCommandTools {
                                               String shellLabel) {
         // 使用 CountDownLatch 等待用户点击按钮（invokeAndWait 在 setVisible 后立即返回，无法等待用户操作）
         final boolean[] result = { false };
+        final boolean[] timedOut = { false };
         final CountDownLatch latch = new CountDownLatch(1);
 
         try {
@@ -422,6 +431,7 @@ public class RunCommandTools {
                     remaining[0]--;
                     if (remaining[0] <= 0) {
                         countdownTimer.stop();
+                        timedOut[0] = true;
                         result[0] = false;
                         frame.dispose();
                         latch.countDown();
@@ -482,8 +492,9 @@ public class RunCommandTools {
                     frame.setLocationRelativeTo(null);
                 }
 
-                // 显示窗口（不抢焦点：不打断用户正在输入的内容）
+                // 显示窗口（不抢焦点：不打断用户正在输入的内容；始终置顶，避免被后续弹窗或其它窗口遮挡）
                 frame.setAutoRequestFocus(false);
+                frame.setAlwaysOnTop(true);
                 frame.setVisible(true);
 
                 // 窗口显示后再开始读秒，避免构造期间就开始倒计时
@@ -494,12 +505,16 @@ public class RunCommandTools {
             latch.await(APPROVAL_TIMEOUT_SECONDS + 5L, TimeUnit.SECONDS);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            lastApprovalTimedOut = false;
             return false;
         } catch (Exception e) {
             // 如果对话框显示失败，默认拒绝执行
+            lastApprovalTimedOut = false;
             return false;
         }
 
+        // 区分“用户点了取消”和“倒计时结束用户没点”
+        lastApprovalTimedOut = !result[0] && timedOut[0];
         return result[0];
     }
 

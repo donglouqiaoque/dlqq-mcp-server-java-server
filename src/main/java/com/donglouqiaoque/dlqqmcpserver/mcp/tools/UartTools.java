@@ -1289,6 +1289,8 @@ public class UartTools {
         guiWindow.setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
         guiWindow.setSize(800, 600);
         guiWindow.setLocationRelativeTo(null);
+        // 始终置顶，避免被后续弹窗或其它窗口遮挡
+        guiWindow.setAlwaysOnTop(true);
 
         // Set window icon（使用 PNG 资源，JDK ImageIO 不支持 ICO 格式）
         LogoLoader.applyTo(guiWindow, "串口工具");

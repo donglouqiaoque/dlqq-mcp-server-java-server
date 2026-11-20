@@ -23,6 +23,8 @@ public abstract class JsonRpcMessage {
         private Object id;
         private String method;
         private Map<String, Object> params;
+        /** 会话标识：来自 params._meta 或 HTTP Mcp-Session-Id，用于单进程多会话。 */
+        private String sessionId;
 
         public Request() {}
 
@@ -54,6 +56,14 @@ public abstract class JsonRpcMessage {
 
         public void setParams(Map<String, Object> params) {
             this.params = params;
+        }
+
+        public String getSessionId() {
+            return sessionId;
+        }
+
+        public void setSessionId(String sessionId) {
+            this.sessionId = sessionId;
         }
 
         public boolean isNotification() {

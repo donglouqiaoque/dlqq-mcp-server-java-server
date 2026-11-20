@@ -37,6 +37,8 @@ final class CommandWindow {
         DialogUi.applyIcon(frame, "CommandWindow");
         // 弹出时不抢焦点，避免打断用户正在输入的内容
         frame.setAutoRequestFocus(false);
+        // 始终置顶，避免被后续弹窗或其它窗口遮挡
+        frame.setAlwaysOnTop(true);
 
         JPanel root = new JPanel(new BorderLayout(8, 8));
         root.setBorder(new EmptyBorder(10, 10, 10, 10));

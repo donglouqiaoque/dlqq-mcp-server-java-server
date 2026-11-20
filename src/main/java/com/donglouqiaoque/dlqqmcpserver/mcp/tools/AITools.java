@@ -119,13 +119,16 @@ public class AITools {
 
         // ========== 系统信息工具 ==========
         registerGetMcpVersionTool(server);          // dlqq_get_mcp_version
-        registerTestHotReloadTool(server);          // dlqq_test_hot_reload
-        registerMcpRemoveToolsTool(server);         // dlqq_mcp_remove_tools
+        // 【源码屏蔽】dlqq_test_hot_reload：仅用于验证热加载，常规使用不需要
+        // registerTestHotReloadTool(server);          // dlqq_test_hot_reload
+        registerMcpHideToolsTool(server);           // dlqq_mcp_hide_tools
+        registerMcpShowToolsTool(server);           // dlqq_mcp_show_tools
         registerMcpRefreshToolsTool(server);        // dlqq_mcp_refresh_tools
         registerMcpResetToolsTool(server);          // dlqq_mcp_reset_tools
         registerMcpRunToolsTool(server);            // dlqq_mcp_run_tools
         registerWorkspaceSetTool(server);           // dlqq_workspace_set
         registerWorkspaceGetTool(server);           // dlqq_workspace_get
+        registerGetCwdPathTool(server);             // dlqq_get_cwd_path
         registerWorkspaceResetTool(server);         // dlqq_workspace_reset
         registerWorkspacePermissionTool(server);    // dlqq_workspace_permission_set
         registerCheckBluetoothTool(server);          // dlqq_check_bluetooth_open
@@ -171,38 +174,40 @@ public class AITools {
         registerRerunUsbTool(server);                 // dlqq_rerun_usb
 
         // ========== 项目构建和芯片操作工具 ==========
-        registerBuildProjectTool(server);           // dlqq_build_project
-        registerRebuildProjectTool(server);         // dlqq_rebuild_project
-        registerChipEraseTool(server);              // dlqq_chip_erase
-        registerChipDownloadTool(server);           // dlqq_chip_download
+        // 【源码屏蔽】根据《MCP 工具权限架构》：项目构建/芯片操作/脚本路径设置类工具不暴露给 AI
+        // registerBuildProjectTool(server);           // dlqq_build_project
+        // registerRebuildProjectTool(server);         // dlqq_rebuild_project
+        // registerChipEraseTool(server);              // dlqq_chip_erase
+        // registerChipDownloadTool(server);           // dlqq_chip_download
 
         // ========== 组合脚本执行工具 ==========
-        registerEraseDownloadTool(server);          // dlqq_erase_download
-        registerBuildEraseDownloadTool(server);   // dlqq_build_erase_download
-        registerRebuildEraseDownloadTool(server); // dlqq_rebuild_erase_download
+        // registerEraseDownloadTool(server);          // dlqq_erase_download
+        // registerBuildEraseDownloadTool(server);   // dlqq_build_erase_download
+        // registerRebuildEraseDownloadTool(server); // dlqq_rebuild_erase_download
 
         // ========== 运行调试工具 ==========
-        registerRunProjectTool(server);             // dlqq_run_project
-        registerDebugProjectTool(server);           // dlqq_debug_project
-        registerBuildRunProjectTool(server);        // dlqq_build_run_project
-        registerBuildDebugProjectTool(server);      // dlqq_build_debug_project
-        registerRebuildRunProjectTool(server);      // dlqq_rebuild_run_project
-        registerRebuildDebugProjectTool(server);    // dlqq_rebuild_debug_project
+        // registerRunProjectTool(server);             // dlqq_run_project
+        // registerDebugProjectTool(server);           // dlqq_debug_project
+        // registerBuildRunProjectTool(server);        // dlqq_build_run_project
+        // registerBuildDebugProjectTool(server);      // dlqq_build_debug_project
+        // registerRebuildRunProjectTool(server);      // dlqq_rebuild_run_project
+        // registerRebuildDebugProjectTool(server);    // dlqq_rebuild_debug_project
 
         // ========== 脚本路径设置工具 ==========
-        registerSetBuildScriptTool(server);         // dlqq_set_build_script
-        registerSetRebuildScriptTool(server);       // dlqq_set_rebuild_script
-        registerSetChipEraseScriptTool(server);     // dlqq_set_chip_erase_script
-        registerSetChipDownloadScriptTool(server);  // dlqq_set_chip_download_script
-        registerSetEraseDownloadScriptTool(server); // dlqq_set_erase_download_script
-        registerSetBuildEraseDownloadScriptTool(server);  // dlqq_set_build_erase_download_script
-        registerSetRebuildEraseDownloadScriptTool(server); // dlqq_set_rebuild_erase_download_script
-        registerSetRunScriptTool(server);           // dlqq_set_run_script
-        registerSetDebugScriptTool(server);         // dlqq_set_debug_script
-        registerSetBuildRunScriptTool(server);      // dlqq_set_build_run_script
-        registerSetBuildDebugScriptTool(server);    // dlqq_set_build_debug_script
-        registerSetRebuildRunScriptTool(server);    // dlqq_set_rebuild_run_script
-        registerSetRebuildDebugScriptTool(server);  // dlqq_set_rebuild_debug_script
+        // 【源码屏蔽】全部脚本路径设置工具：AI 不得通过设置脚本来绕过人工审批
+        // registerSetBuildScriptTool(server);         // dlqq_set_build_script
+        // registerSetRebuildScriptTool(server);       // dlqq_set_rebuild_script
+        // registerSetChipEraseScriptTool(server);     // dlqq_set_chip_erase_script
+        // registerSetChipDownloadScriptTool(server);  // dlqq_set_chip_download_script
+        // registerSetEraseDownloadScriptTool(server); // dlqq_set_erase_download_script
+        // registerSetBuildEraseDownloadScriptTool(server);  // dlqq_set_build_erase_download_script
+        // registerSetRebuildEraseDownloadScriptTool(server); // dlqq_set_rebuild_erase_download_script
+        // registerSetRunScriptTool(server);           // dlqq_set_run_script
+        // registerSetDebugScriptTool(server);         // dlqq_set_debug_script
+        // registerSetBuildRunScriptTool(server);      // dlqq_set_build_run_script
+        // registerSetBuildDebugScriptTool(server);    // dlqq_set_build_debug_script
+        // registerSetRebuildRunScriptTool(server);    // dlqq_set_rebuild_run_script
+        // registerSetRebuildDebugScriptTool(server);  // dlqq_set_rebuild_debug_script
 
         // ========== WiFi工具 ==========
         WifiTools.registerTools(server);            // dlqq_run_wifi 等12个
@@ -259,10 +264,17 @@ public class AITools {
         charsetProp.put("description", "字符集编码（如 UTF-8、GBK、ISO-8859-1 等，默认为 UTF-8）");
         properties.put("charset", charsetProp);
 
+        Map<String, Object> rawProp = new HashMap<>();
+        rawProp.put("type", "boolean");
+        rawProp.put("description", "原文模式（可选，默认 false）：true 时返回不带行号的纯文本，"
+            + "可直接整段粘贴给 dlqq_replace_lines_in_file 的 expected_text");
+        properties.put("raw", rawProp);
+
         ToolInputSchema inputSchema = new ToolInputSchema(properties, Arrays.asList("file_path"));
 
         server.addTool("dlqq_read_file",
-            "读取指定文件的指定行范围的内容。支持通过start_line和end_line指定范围，或通过start_line和read_lines指定起始行和读取行数。支持指定字符集编码（默认UTF-8）。",
+            "读取指定文件的指定行范围的内容。支持通过start_line和end_line指定范围，或通过start_line和read_lines指定起始行和读取行数。支持指定字符集编码（默认UTF-8）。"
+            + "raw=true 时返回无行号原文，便于直接作为 expected_text。",
             inputSchema,
             arguments -> {
                 String filePath = (String) arguments.get("file_path");
@@ -270,6 +282,7 @@ public class AITools {
                 Integer endLine = parseInteger(arguments.get("end_line"), -1);
                 Integer readLines = parseInteger(arguments.get("read_lines"), 0);
                 String charset = (String) arguments.get("charset");
+                boolean raw = parseBoolean(arguments.get("raw"), false);
 
                 if (filePath == null || filePath.trim().isEmpty()) {
                     return errorResult("文件路径不能为空");
@@ -277,6 +290,17 @@ public class AITools {
 
                 try {
                     String content = FileTools.readFile(filePath, startLine, endLine, readLines, charset);
+                    if (raw) {
+                        StringBuilder sb = new StringBuilder();
+                        String[] lines = content.split("\n", -1);
+                        for (int i = 0; i < lines.length; i++) {
+                            if (i > 0) {
+                                sb.append('\n');
+                            }
+                            sb.append(lines[i].replaceFirst("^\\s*\\d+\\s*\\|\\s?", ""));
+                        }
+                        content = sb.toString();
+                    }
                     return textResult(content);
                 } catch (IOException e) {
                     return errorResult("读取文件失败: " + e.getMessage());
@@ -558,10 +582,16 @@ public class AITools {
             + "与实际内容不一致时拒绝修改，并在错误里回显实际内容，可避免按行号改错位置");
         properties.put("expected_text", expectedProp);
 
+        Map<String, Object> dryRunProp = new HashMap<>();
+        dryRunProp.put("type", "boolean");
+        dryRunProp.put("description", "预览模式（可选，默认 false）：true 时只返回替换前后的对比，不写入文件");
+        properties.put("dry_run", dryRunProp);
+
         ToolInputSchema inputSchema = new ToolInputSchema(properties, Arrays.asList("file_path", "start_line", "end_line", "content"));
 
         server.addTool("dlqq_replace_lines_in_file",
-            "将文件中指定行范围的内容替换为新内容（包含起始行和结束行）。支持多行替换。支持指定字符集编码（默认UTF-8）。注意：end_line为-1表示到文件末尾，行号超出范围会自动修正。",
+            "将文件中指定行范围的内容替换为新内容（包含起始行和结束行）。支持多行替换。支持指定字符集编码（默认UTF-8）。注意：end_line为-1表示到文件末尾，行号超出范围会自动修正。"
+            + "建议同时传 expected_text 做保护，dry_run=true 可先预览。",
             inputSchema,
             arguments -> {
                 String filePath = (String) arguments.get("file_path");
@@ -583,10 +613,21 @@ public class AITools {
                         "建议：将 \\n 替换为 \\\n 或使用 dlqq_insert_text_in_file 工具逐行插入");
                 }
 
+                boolean dryRun = parseBoolean(arguments.get("dry_run"), false);
                 // expected_text 校验：确认目标行当前内容与预期一致，避免按行号改错位置
                 Object expectedObj = arguments.get("expected_text");
                 if (expectedObj != null) {
-                    String expected = String.valueOf(expectedObj).replace("\r\n", "\n");
+                    // 容忍从 dlqq_read_file 输出里直接复制：去掉 "123 | " 行号前缀
+                    String rawExpected = String.valueOf(expectedObj).replace("\r\n", "\n");
+                    StringBuilder expectedBuilder = new StringBuilder();
+                    String[] expectedLines = rawExpected.split("\n", -1);
+                    for (int i = 0; i < expectedLines.length; i++) {
+                        if (i > 0) {
+                            expectedBuilder.append('\n');
+                        }
+                        expectedBuilder.append(expectedLines[i].replaceFirst("^\\s*\\d+\\s*\\|\\s?", ""));
+                    }
+                    String expected = expectedBuilder.toString();
                     String actual = "";
                     try {
                         Charset cs = Charset.forName(
@@ -601,6 +642,42 @@ public class AITools {
                     if (!expected.equals(actual)) {
                         return errorResult("【拒绝修改】第 " + startLine + "-" + endLine
                                 + " 行与 expected_text 不一致，未做任何改动。\n\n实际内容:\n" + actual);
+                    }
+                }
+
+                // dry_run：只预览替换结果，不写入文件
+                if (dryRun) {
+                    try {
+                        Charset cs = Charset.forName(
+                                charset == null || charset.isEmpty() ? "UTF-8" : charset);
+                        List<String> all = Files.readAllLines(Workspace.resolve(filePath), cs);
+                        int from = Math.max(1, startLine);
+                        int to = endLine == -1 ? all.size() : Math.min(all.size(), endLine);
+                        String[] newLines = content.split("\n", -1);
+                        StringBuilder sb = new StringBuilder();
+                        sb.append("【预览 dry_run】未写入任何内容\n");
+                        sb.append("===================\n\n");
+                        sb.append("文件: ").append(filePath).append('\n');
+                        sb.append("替换 ").append(from).append('-').append(to)
+                          .append(" 行：原 ").append(Math.max(0, to - from + 1))
+                          .append(" 行 → 新 ").append(newLines.length).append(" 行\n\n");
+                        int ctxFrom = Math.max(1, from - 3);
+                        int ctxTo = Math.min(all.size(), to + 3);
+                        for (int i = ctxFrom; i < from; i++) {
+                            sb.append("    ").append(i).append(" | ").append(all.get(i - 1)).append('\n');
+                        }
+                        for (int i = from; i <= to && i <= all.size(); i++) {
+                            sb.append("-   ").append(i).append(" | ").append(all.get(i - 1)).append('\n');
+                        }
+                        for (int i = 0; i < newLines.length; i++) {
+                            sb.append("+   ").append(from + i).append(" | ").append(newLines[i]).append('\n');
+                        }
+                        for (int i = to + 1; i <= ctxTo; i++) {
+                            sb.append("    ").append(i).append(" | ").append(all.get(i - 1)).append('\n');
+                        }
+                        return textResult(sb.toString());
+                    } catch (Exception e) {
+                        return errorResult("预览失败: " + e.getMessage());
                     }
                 }
 
@@ -3982,47 +4059,83 @@ public class AITools {
     }
 
     /**
-     * dlqq_mcp_remove_tools - 动态移除（禁用）指定 MCP 工具，并持久化到 settings.properties
+     * dlqq_mcp_hide_tools - 动态隐藏（禁用）指定 MCP 工具，并持久化到 settings.properties
      */
-    private void registerMcpRemoveToolsTool(McpServer server) {
+    private void registerMcpHideToolsTool(McpServer server) {
         Map<String, Object> properties = new HashMap<>();
         Map<String, Object> toolNamesProp = new HashMap<>();
         toolNamesProp.put("type", "array");
         toolNamesProp.put("items", Collections.singletonMap("type", "string"));
-        toolNamesProp.put("description", "要移除的工具名列表，如 [\"dlqq_capture_screen\",\"dlqq_convert_image\"]；也支持逗号分隔字符串");
+        toolNamesProp.put("description", "要隐藏的工具名列表，如 [\"dlqq_capture_screen\",\"dlqq_convert_image\"]；也支持逗号分隔字符串");
         properties.put("tool_names", toolNamesProp);
         ToolInputSchema inputSchema = new ToolInputSchema(properties, Collections.singletonList("tool_names"));
 
-        server.addTool("dlqq_mcp_remove_tools",
-            "动态移除（禁用）指定的 MCP 工具：立即对客户端不可见，并写入 .dlqq/settings/settings.properties 的 mcp.tools.excluded，下次启动仍然保持移除状态",
+        server.addTool("dlqq_mcp_hide_tools",
+            "动态隐藏（禁用）指定的 MCP 工具：立即对客户端不可见，并写入 .dlqq/settings/settings.properties 的 mcp.tools.excluded，下次启动仍然保持隐藏状态；可用 dlqq_mcp_show_tools 恢复",
             inputSchema,
             arguments -> {
                 List<String> names = parseToolNames(arguments);
                 if (names.isEmpty()) {
-                    return textResult("✗ 错误：请提供要移除的工具名（tool_names）");
+                    return textResult("✗ 错误：请提供要隐藏的工具名（tool_names）");
                 }
                 McpServer.ToolChangeResult result = server.disableTools(names);
                 McpTools.saveExcludedToolNames(server.getDisabledTools());
                 boolean notified = server.notifyToolsListChanged();
 
                 StringBuilder sb = new StringBuilder();
-                sb.append("动态移除工具结果\n");
+                sb.append("动态隐藏工具结果\n");
                 sb.append("===================\n\n");
-                sb.append("本次移除: ").append(result.applied.isEmpty() ? "（无）" : String.join(", ", result.applied)).append("\n");
+                sb.append("本次隐藏: ").append(result.applied.isEmpty() ? "（无）" : String.join(", ", result.applied)).append("\n");
                 if (!result.unknown.isEmpty()) {
                     sb.append("不存在的工具: ").append(String.join(", ", result.unknown)).append("\n");
                 }
                 if (!result.protectedNames.isEmpty()) {
-                    sb.append("受保护不可移除: ").append(String.join(", ", result.protectedNames)).append("\n");
+                    sb.append("受保护不可隐藏: ").append(String.join(", ", result.protectedNames)).append("\n");
                 }
                 sb.append("当前启用工具: ").append(result.enabledCount).append(" 个\n");
-                sb.append("当前已移除工具: ").append(result.disabledCount).append(" 个");
+                sb.append("当前已隐藏工具: ").append(result.disabledCount).append(" 个");
                 if (result.disabledCount > 0) {
                     sb.append("（").append(String.join(", ", server.getDisabledTools())).append("）");
                 }
                 sb.append("\n");
                 sb.append("已持久化到 settings.properties: ").append(McpTools.EXCLUDED_TOOLS_KEY).append("\n");
                 sb.append("客户端刷新通知: ").append(notified ? "已发送" : "未发送（无 SSE 连接，客户端下次重连后生效）");
+                return textResult(sb.toString());
+            }
+        );
+    }
+
+    /**
+     * dlqq_mcp_show_tools - 恢复（显示）指定被隐藏的 MCP 工具，并持久化
+     */
+    private void registerMcpShowToolsTool(McpServer server) {
+        Map<String, Object> properties = new HashMap<>();
+        Map<String, Object> toolNamesProp = new HashMap<>();
+        toolNamesProp.put("type", "array");
+        toolNamesProp.put("items", Collections.singletonMap("type", "string"));
+        toolNamesProp.put("description", "要恢复显示的工具名列表；也支持逗号分隔字符串");
+        properties.put("tool_names", toolNamesProp);
+        ToolInputSchema inputSchema = new ToolInputSchema(properties, Collections.singletonList("tool_names"));
+
+        server.addTool("dlqq_mcp_show_tools",
+            "恢复（显示）指定被隐藏的 MCP 工具：从 mcp.tools.excluded 中移除并立即生效，下次启动仍然保持显示",
+            inputSchema,
+            arguments -> {
+                List<String> names = parseToolNames(arguments);
+                if (names.isEmpty()) {
+                    return textResult("✗ 错误：请提供要恢复显示的工具名（tool_names）");
+                }
+                List<String> restored = server.enableTools(names);
+                McpTools.saveExcludedToolNames(server.getDisabledTools());
+                boolean notified = server.notifyToolsListChanged();
+                StringBuilder sb = new StringBuilder();
+                sb.append("动态显示工具结果\n");
+                sb.append("===================\n\n");
+                sb.append("本次恢复: ").append(restored.isEmpty() ? "（无，工具本就未隐藏）" : String.join(", ", restored)).append("\n");
+                sb.append("当前启用工具: ").append(server.getEnabledToolCount()).append(" 个\n");
+                sb.append("当前已隐藏工具: ").append(server.getDisabledTools().size()).append(" 个\n");
+                sb.append("已持久化到 settings.properties: ").append(McpTools.EXCLUDED_TOOLS_KEY).append("\n");
+                sb.append("客户端刷新通知: ").append(notified ? "已发送" : "未发送（无 SSE 连接）");
                 return textResult(sb.toString());
             }
         );
@@ -4149,16 +4262,25 @@ public class AITools {
                     return textResult("✗ 设置失败：工作区必须是已存在的绝对目录: " + path);
                 }
                 Path target = Workspace.resolve(path);
-                boolean confirmed = DialogTools.showConfirmDialog(
-                        "修改工作区确认",
-                        "AI 请求修改 MCP 服务器的工作区：\n\n"
-                                + "当前工作区:\n" + Workspace.getRoot() + "\n\n"
-                                + "新工作区:\n" + target + "\n\n"
+                // 目标工作区与当前一致：直接返回，不弹任何窗口
+                if (target.toAbsolutePath().normalize()
+                        .equals(Workspace.getRoot().toAbsolutePath().normalize())) {
+                    return textResult("工作区未变化，无需修改\n===================\n\n"
+                            + "当前工作区: " + Workspace.getRoot() + "\n"
+                            + "来源: " + Workspace.getSource() + "\n"
+                            + "资源权限: " + Workspace.getPermissionLabel());
+                }
+                // 切换工作区始终需要审批（带倒计时，倒计时与工具总超时一致）
+                boolean confirmed = DialogTools.showApprovalDialog(
+                        "切换工作区审批",
+                        "AI 请求切换 MCP 服务器的工作区：\n\n"
+                                + "当前工作区: " + Workspace.getRoot() + "\n"
+                                + "新工作区: " + target + "\n\n"
                                 + "工作区路径不持久化，仅本次运行有效。\n"
-                                + "是否允许修改？"
+                                + "是否允许切换？"
                 );
                 if (!confirmed) {
-                    return textResult("【操作已取消】用户拒绝了修改工作区\n当前工作区: " + Workspace.getRoot());
+                    return textResult("【操作已取消】用户拒绝了工作区切换\n当前工作区: " + Workspace.getRoot());
                 }
                 try {
                     Workspace.setRoot(path);
@@ -4168,7 +4290,8 @@ public class AITools {
                 return textResult("工作区已设置（仅本次运行有效，不持久化）\n===================\n\n"
                         + "当前工作区: " + Workspace.getRoot() + "\n"
                         + "来源: " + Workspace.getSource() + "\n"
-                        + "修改权限: " + Workspace.getPermissionLabel() + "\n"
+                        + "资源权限: " + Workspace.getPermissionLabel() + "\n"
+                        + "操作权限: " + Workspace.getOperationPermissionLabel() + "\n"
                         + "权限配置: " + Workspace.getPermissionFile());
             }
         );
@@ -4182,18 +4305,39 @@ public class AITools {
         ToolInputSchema inputSchema = new ToolInputSchema(properties, Collections.emptyList());
 
         server.addTool("dlqq_workspace_get",
-            "查看当前工作区目录、来源（启动参数 --workspace / 运行期设置 / 进程工作目录）、修改权限（readonly/workspace/approval/full）、权限配置文件与进程 CWD",
+            "查看当前工作区目录、来源（启动参数 --workspace / 运行期设置 / 进程工作目录）、资源权限（chat/readonly/workspace/approval/highrisk/full）、操作权限（readonly/approval/highrisk/full）、权限配置文件与进程 CWD；并显示当前会话标识、会话键名、活跃会话数（单进程多会话 × 多 Agent）",
             inputSchema,
             arguments -> textResult("工作区信息\n===================\n\n"
+                    + "当前会话: " + Workspace.getSessionId() + "\n"
+                    + "会话标识键: params._meta[" + Workspace.getSessionMetaKey() + "]\n"
+                    + "Agent 标识键: params._meta[" + Workspace.getSessionAgentMetaKey() + "]\n"
+                    + "活跃会话数: " + Workspace.getSessionCount() + "\n"
                     + "当前工作区: " + Workspace.getRoot() + "\n"
                     + "来源: " + Workspace.getSource() + "\n"
                     + "启动参数: " + (Workspace.getCliPath() == null ? "（未指定）" : Workspace.getCliPath()) + "\n"
-                    + "修改权限: " + Workspace.getPermissionLabel() + "\n"
+                    + "资源权限: " + Workspace.getPermissionLabel() + "\n"
+                    + "操作权限: " + Workspace.getOperationPermissionLabel() + "\n"
                     + "权限配置: " + Workspace.getPermissionFile() + "\n"
                     + "进程工作目录: " + System.getProperty("user.dir"))
         );
     }
 
+    /**
+     * dlqq_get_cwd_path - 获取进程当前工作目录（CWD）与工作区路径
+     */
+    private void registerGetCwdPathTool(McpServer server) {
+        Map<String, Object> properties = new HashMap<>();
+        ToolInputSchema inputSchema = new ToolInputSchema(properties, Collections.emptyList());
+        server.addTool("dlqq_get_cwd_path",
+            "获取 MCP 服务进程的当前工作目录（CWD）与当前工作区路径",
+            inputSchema,
+            arguments -> textResult("路径信息\n===================\n\n"
+                    + "进程工作目录: " + System.getProperty("user.dir") + "\n"
+                    + "当前工作区: " + Workspace.getRoot() + "\n"
+                    + "工作区来源: " + Workspace.getSource() + "\n"
+                    + "当前会话: " + Workspace.getSessionId())
+        );
+    }
     /**
      * dlqq_workspace_reset - 清除持久化工作区并回退
      */
@@ -4208,54 +4352,156 @@ public class AITools {
                 String target = Workspace.getCliPath() != null
                         ? Workspace.getCliPath()
                         : System.getProperty("user.dir");
-            boolean confirmed = DialogTools.showConfirmDialog(
-                    "重置工作区确认",
-                    "AI 请求重置 MCP 服务器的工作区：\n\n"
-                            + "当前工作区:\n" + Workspace.getRoot() + "\n\n"
-                            + "回退到:\n" + target + "\n\n"
-                            + "是否允许重置？"
-            );
-            if (!confirmed) {
-                return textResult("【操作已取消】用户拒绝了重置工作区\n当前工作区: " + Workspace.getRoot());
-            }
-            Workspace.resetToDefault();
-            return textResult("工作区已重置\n===================\n\n"
-                    + "当前工作区: " + Workspace.getRoot() + "\n"
-                    + "来源: " + Workspace.getSource() + "\n"
-                    + "修改权限: " + Workspace.getPermissionLabel());
+                Path targetPath = Workspace.resolve(target);
+                // 回退目标与当前一致：直接返回，不弹窗口
+                if (targetPath.toAbsolutePath().normalize()
+                        .equals(Workspace.getRoot().toAbsolutePath().normalize())) {
+                    return textResult("工作区已是默认值，无需重置\n===================\n\n"
+                            + "当前工作区: " + Workspace.getRoot()
+                            + "\n来源: " + Workspace.getSource());
+                }
+                // 重置工作区始终需要审批（带倒计时）
+                boolean confirmed = DialogTools.showApprovalDialog(
+                        "重置工作区审批",
+                        "AI 请求重置 MCP 服务器的工作区：\n\n"
+                                + "当前工作区: " + Workspace.getRoot() + "\n\n"
+                                + "回退到: " + targetPath + "\n\n"
+                                + "是否允许重置？"
+                );
+                if (!confirmed) {
+                    return textResult("【操作已取消】用户拒绝了重置工作区\n当前工作区: " + Workspace.getRoot());
+                }
+                Workspace.resetToDefault();
+                return textResult("工作区已重置\n===================\n\n"
+                        + "当前工作区: " + Workspace.getRoot() + "\n"
+                        + "来源: " + Workspace.getSource() + "\n"
+                        + "资源权限: " + Workspace.getPermissionLabel());
             }
         );
     }
 
     /**
-     * dlqq_workspace_permission_set - 设置工作区文件修改权限（持久化到工作区配置）
+     * dlqq_workspace_permission_set - 设置资源权限 / 操作权限（持久化到工作区配置）
      */
     private void registerWorkspacePermissionTool(McpServer server) {
         Map<String, Object> properties = new HashMap<>();
-        Map<String, Object> modeProp = new HashMap<>();
-        modeProp.put("type", "string");
-        modeProp.put("description", "权限模式：readonly（只读）、workspace（仅工作区内修改）、approval（工作区外审批）、full（完全权限）");
-        properties.put("mode", modeProp);
-        ToolInputSchema inputSchema = new ToolInputSchema(properties, Collections.singletonList("mode"));
+        Map<String, Object> resourceProp = new HashMap<>();
+        resourceProp.put("type", "string");
+        resourceProp.put("description", "资源权限：chat（对话）、readonly（只读）、workspace（仅工作区内修改）、approval（工作区外审批）、highrisk（高危需批准）、full（完全权限）");
+        properties.put("resource_mode", resourceProp);
+        Map<String, Object> operationProp = new HashMap<>();
+        operationProp.put("type", "string");
+        operationProp.put("description", "操作权限：readonly（只读）、approval（需要批准）、highrisk（高危需批准）、full（完全权限）");
+        properties.put("operation_mode", operationProp);
+        ToolInputSchema inputSchema = new ToolInputSchema(properties, Collections.emptyList());
 
         server.addTool("dlqq_workspace_permission_set",
-            "设置当前工作区的文件修改权限，并持久化到工作区内的 " + Workspace.SETTINGS_RELATIVE_PATH
-                    + "（键 " + Workspace.PERMISSION_KEY + "）：readonly 只读、workspace 仅工作区内修改、approval 工作区外审批、full 完全权限",
+            "设置当前工作区的资源权限（文件/目录/命令等）与操作权限（鼠标/键盘/屏幕/串口/BLE/WiFi/USB 等外设）。"
+                    + "该工具在任意权限等级下都可调用；降权/同级直接执行，提权必须用户批准。"
+                    + "配置写入 " + Workspace.SETTINGS_RELATIVE_PATH + " 的 "
+                    + Workspace.PERMISSION_KEY + " 与 " + Workspace.OPERATION_PERMISSION_KEY,
             inputSchema,
             arguments -> {
-                Object raw = arguments == null ? null : arguments.get("mode");
-                String mode = raw == null ? "" : String.valueOf(raw).trim();
+                String resourceMode = arguments == null || arguments.get("resource_mode") == null ? null
+                        : String.valueOf(arguments.get("resource_mode")).trim();
+                String operationMode = arguments == null || arguments.get("operation_mode") == null ? null
+                        : String.valueOf(arguments.get("operation_mode")).trim();
+                if ((resourceMode == null || resourceMode.isEmpty())
+                        && (operationMode == null || operationMode.isEmpty())) {
+                    return textResult("✗ 请至少提供 resource_mode（资源权限）或 operation_mode（操作权限）之一");
+                }
+                // 参数校验必须在审批之前：非法权限值直接报错，不弹审批窗口
+                if (resourceMode != null && !resourceMode.isEmpty() && resourceRank(resourceMode) < 0) {
+                    return textResult("✗ 参数错误：resource_mode 非法（" + resourceMode
+                            + "），可选值：chat / readonly / workspace / approval / highrisk / full");
+                }
+                if (operationMode != null && !operationMode.isEmpty() && operationRank(operationMode) < 0) {
+                    return textResult("✗ 参数错误：operation_mode 非法（" + operationMode
+                            + "），可选值：readonly / approval / highrisk / full");
+                }
+                // 特殊规则：降权/同级直接执行，提权必须用户批准
+                StringBuilder escalation = new StringBuilder();
+                if (resourceMode != null && !resourceMode.isEmpty()
+                        && resourceRank(resourceMode) > resourceRank(Workspace.getPermission())) {
+                    escalation.append("资源权限: ").append(Workspace.getPermissionLabel())
+                            .append(" → ").append(resourceMode).append("\n");
+                }
+                if (operationMode != null && !operationMode.isEmpty()
+                        && operationRank(operationMode) > operationRank(Workspace.getOperationPermission())) {
+                    escalation.append("操作权限: ").append(Workspace.getOperationPermissionLabel())
+                            .append(" → ").append(operationMode).append("\n");
+                }
+                if (escalation.length() > 0) {
+                    boolean approved = DialogTools.showApprovalDialog(
+                            "权限提权审批",
+                            "AI 请求提升 MCP 服务器权限：\n\n" + escalation
+                                    + "\n当前工作区: " + Workspace.getRoot() + "\n"
+                                    + "权限配置文件: " + Workspace.getPermissionFile() + "\n\n"
+                                    + "提权后 AI 可执行的操作范围会扩大，是否允许？");
+                    if (!approved) {
+                        return textResult("【操作已取消】用户拒绝提升权限\n资源权限: " + Workspace.getPermissionLabel()
+                                + "\n操作权限: " + Workspace.getOperationPermissionLabel());
+                    }
+                }
                 try {
-                    Workspace.setPermission(mode);
+                    if (resourceMode != null && !resourceMode.isEmpty()) {
+                        Workspace.setPermission(resourceMode);
+                    }
+                    if (operationMode != null && !operationMode.isEmpty()) {
+                        Workspace.setOperationPermission(operationMode);
+                    }
                 } catch (IllegalArgumentException e) {
                     return textResult("✗ 设置失败：" + e.getMessage());
                 }
                 return textResult("工作区权限已设置\n===================\n\n"
                         + "当前工作区: " + Workspace.getRoot() + "\n"
-                        + "修改权限: " + Workspace.getPermissionLabel() + "\n"
+                        + "资源权限: " + Workspace.getPermissionLabel() + "\n"
+                        + "操作权限: " + Workspace.getOperationPermissionLabel() + "\n"
                         + "权限配置: " + Workspace.getPermissionFile());
             }
         );
+    }
+
+    /** 资源权限等级数值：越大权限越高；未知模式返回 -1。 */
+    private static int resourceRank(String mode) {
+        if (mode == null) {
+            return -1;
+        }
+        switch (mode.trim().toLowerCase()) {
+            case "chat":
+                return 0;
+            case "readonly":
+                return 1;
+            case "workspace":
+                return 2;
+            case "approval":
+                return 3;
+            case "highrisk":
+                return 4;
+            case "full":
+                return 5;
+            default:
+                return -1;
+        }
+    }
+
+    /** 操作权限等级数值：越大权限越高；未知模式返回 -1。 */
+    private static int operationRank(String mode) {
+        if (mode == null) {
+            return -1;
+        }
+        switch (mode.trim().toLowerCase()) {
+            case "readonly":
+                return 1;
+            case "approval":
+                return 2;
+            case "highrisk":
+                return 3;
+            case "full":
+                return 4;
+            default:
+                return -1;
+        }
     }
 
     /**
@@ -4601,6 +4847,12 @@ public class AITools {
                 }
 
                 // 设置属性
+                // 权限相关属性禁止通过本工具修改：权限只能由 dlqq_workspace_permission_set 管理
+                if (key != null && (key.startsWith("permission.") || key.startsWith("tool.policy.")
+                        || "workspace.write.mode".equals(key))) {
+                    return errorResult("✗ 拒绝设置：'" + key + "' 属于权限相关属性，"
+                            + "请使用 dlqq_workspace_permission_set 修改权限，本工具不接受权限类键名");
+                }
                 // 对 response.max.size 进行验证，不能超过API上限
                 if ("response.max.size".equals(key)) {
                     try {
@@ -4664,14 +4916,17 @@ public class AITools {
         });
     }
 
-    /**
-     * dlqq_set_build_script - 设置构建脚本路径
-     */
+    /*
+     * 【已屏蔽】dlqq_set_build_script - 设置构建脚本路径
+     * 屏蔽原因：AI 不应通过设置脚本路径绕过人工审批（构建必须走 dlqq_run_command 并人工确认）。
+     * 保留代码以备将来恢复；如需启用，取消下一段注释并把上面的注册行一并放开。
+     *
     private void registerSetBuildScriptTool(McpServer server) {
         registerSetScriptTool(server, "dlqq_set_build_script",
             "设置构建脚本路径。配置保存到 .dlqq/settings/settings.properties 的 script.build 项。",
             McpTools::setBuildScript);
     }
+     */
 
     /**
      * dlqq_get_tool_list - 获取工具列表
@@ -4995,8 +5250,9 @@ public class AITools {
 
         Map<String, Object> formatProp = new HashMap<>();
         formatProp.put("type", "string");
-        formatProp.put("description", "压缩格式（可选，默认zip，目前仅支持zip）");
-        formatProp.put("enum", Arrays.asList("zip"));
+        formatProp.put("description", "压缩格式（可选，默认 zip）：zip 为标准压缩包；zstd 为单文件 .zst，"
+            + "目录或多个源会自动打包为 .tar.zst");
+        formatProp.put("enum", Arrays.asList("zip", "zstd", "zst", "tar.zst", "tzst"));
         properties.put("format", formatProp);
 
         Map<String, Object> passwordProp = new HashMap<>();
@@ -5012,8 +5268,9 @@ public class AITools {
         ToolInputSchema inputSchema = new ToolInputSchema(properties, Arrays.asList("source_paths"));
 
         server.addTool("dlqq_zip",
-            "压缩文件或目录为ZIP格式。支持多文件/目录压缩、密码保护、压缩级别设置。"
-            + "支持的格式：zip。可设置1-9级压缩级别，数值越大压缩率越高但速度越慢。"
+            "压缩文件或目录。支持 zip 与 zstd 两种格式。" 
+            + "zip：多文件/目录压缩、密码保护、压缩级别 1-9。"
+            + "zstd：单个文件生成 .zst；目录或多个源自动打包为 .tar.zst（密码不适用）。"
             + "默认输出到 .dlqq/cache 目录。",
             inputSchema,
             arguments -> {
@@ -5036,11 +5293,30 @@ public class AITools {
                     sb.append("===================\n\n");
                     sb.append("输出文件: ").append(result.get("outputPath")).append("\n");
                     sb.append("格式: ").append(result.get("format")).append("\n");
-                    sb.append("原始大小: ").append(formatFileSize((Long) result.get("originalSize"))).append("\n");
-                    sb.append("压缩后大小: ").append(formatFileSize((Long) result.get("compressedSize"))).append("\n");
-                    sb.append("压缩率: ").append(result.get("compressionRatio")).append("\n");
-                    sb.append("文件数: ").append(result.get("fileCount")).append("\n");
-                    sb.append("密码保护: ").append(((Boolean) result.get("passwordProtected")) ? "是" : "否").append("\n");
+                    Object originalSize = result.get("originalSize");
+                    if (originalSize instanceof Long) {
+                        sb.append("原始大小: ").append(formatFileSize((Long) originalSize)).append("\n");
+                    }
+                    Object compressedSize = result.get("compressedSize");
+                    if (compressedSize instanceof Long) {
+                        sb.append("压缩后大小: ").append(formatFileSize((Long) compressedSize)).append("\n");
+                    }
+                    Object ratio = result.get("compressionRatio");
+                    if (ratio != null) {
+                        sb.append("压缩率: ").append(ratio).append("\n");
+                    }
+                    Object fileCount = result.get("fileCount");
+                    if (fileCount != null) {
+                        sb.append("文件数: ").append(fileCount).append("\n");
+                    }
+                    Object sourceCount = result.get("sourceCount");
+                    if (sourceCount != null) {
+                        sb.append("源数量: ").append(sourceCount).append("\n");
+                    }
+                    Object passwordProtected = result.get("passwordProtected");
+                    if (passwordProtected != null) {
+                        sb.append("密码保护: ").append(((Boolean) passwordProtected) ? "是" : "否").append("\n");
+                    }
 
                     return textResult(sb.toString());
                 } catch (IOException e) {
@@ -5071,24 +5347,33 @@ public class AITools {
         passwordProp.put("description", "解压密码（可选，如果ZIP有密码则需要提供）");
         properties.put("password", passwordProp);
 
+        Map<String, Object> detectModeProp = new HashMap<>();
+        detectModeProp.put("type", "integer");
+        detectModeProp.put("description", "格式判定模式（可选，默认 0）："
+            + "0=严格按后缀名，实际格式与后缀不符或后缀不支持则报错；"
+            + "1=先按后缀名，不符或识别不出时自动探测真实格式；"
+            + "2=忽略后缀名，只按文件内容探测，探测不出则报错");
+        properties.put("detect_mode", detectModeProp);
+
         ToolInputSchema inputSchema = new ToolInputSchema(properties, Arrays.asList("zip_path"));
 
         server.addTool("dlqq_unzip",
-            "解压ZIP文件。支持密码保护的ZIP文件解压。"
+            "解压压缩文件（支持 zip/7z/tar/gz/bz2/xz/zstd 等）。"
             + "默认解压到 .dlqq/cache 目录下的同名文件夹中。"
-            + "可以查看ZIP文件内容后再决定是否需要解压。",
+            + "detect_mode 控制格式判定：0 严格按后缀、1 后缀失败再探测、2 只看文件内容。",
             inputSchema,
             arguments -> {
                 String zipPath = (String) arguments.get("zip_path");
                 String outputDir = (String) arguments.get("output_dir");
                 String password = (String) arguments.get("password");
+                Integer detectMode = parseInteger(arguments.get("detect_mode"), 0);
 
                 if (zipPath == null || zipPath.trim().isEmpty()) {
                     return errorResult("ZIP文件路径不能为空");
                 }
 
                 try {
-                    Map<String, Object> result = ZipTools.unzipFile(zipPath, outputDir, password);
+                    Map<String, Object> result = ZipTools.unzipFile(zipPath, outputDir, password, detectMode);
 
                     StringBuilder sb = new StringBuilder();
                     sb.append("✓ 解压成功\n");

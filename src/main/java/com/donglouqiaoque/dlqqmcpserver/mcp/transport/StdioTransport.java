@@ -1,6 +1,7 @@
 package com.donglouqiaoque.dlqqmcpserver.mcp.transport;
 
 import com.donglouqiaoque.dlqqmcpserver.mcp.protocol.JsonRpcMessage;
+import com.donglouqiaoque.dlqqmcpserver.utils.SessionScope;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.reflect.TypeToken;
@@ -626,10 +627,14 @@ public class StdioTransport implements McpTransport {
             }
             debug("parseRequest: params=" + params);
 
+            // 提取会话标识：params._meta[<sessionMetaKey>]，实现单进程多会话
+            String sessionId = SessionScope.resolveSessionId(params);
+
             JsonRpcMessage.Request request = new JsonRpcMessage.Request();
             request.setId(id);
             request.setMethod(method);
             request.setParams(params);
+            request.setSessionId(sessionId);
             return request;
         } catch (Exception e) {
             logger.error("[StdioTransport] Gson JSON parse failed: " + e.getMessage() + ", JSON: " + json);
@@ -1162,6 +1167,7 @@ public class StdioTransport implements McpTransport {
     /**
      * 序列化值为JSON
      */
+    @SuppressWarnings("unchecked")
     private String serializeValue(Object value) {
         if (value == null) {
             return "null";

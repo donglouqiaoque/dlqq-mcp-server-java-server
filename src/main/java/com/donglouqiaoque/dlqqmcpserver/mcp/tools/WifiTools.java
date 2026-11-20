@@ -137,6 +137,8 @@ public class WifiTools {
         guiWindow.setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
         guiWindow.setSize(720, 520);
         guiWindow.setLocationRelativeTo(null);
+        // 始终置顶，避免被后续弹窗或其它窗口遮挡
+        guiWindow.setAlwaysOnTop(true);
 
         // Set window icon
         LogoLoader.applyTo(guiWindow, "WiFi工具");

@@ -17,10 +17,11 @@ final class DialogUi {
     }
 
     /**
-     * 设置窗口标题栏 LOGO。
+     * 设置窗口标题栏 LOGO，并统一窗口行为：始终置顶（避免被后续弹窗遮挡）。
      */
     static void applyIcon(JFrame frame, String toolName) {
         LogoLoader.applyTo(frame, toolName);
+        frame.setAlwaysOnTop(true);
     }
 
     /**

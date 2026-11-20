@@ -12,6 +12,7 @@ import java.awt.event.WindowEvent;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 
+import com.donglouqiaoque.dlqqmcpserver.mcp.policy.ToolTimeoutContext;
 import com.donglouqiaoque.dlqqmcpserver.utils.Workspace;
 
 /**
@@ -601,5 +602,148 @@ public class DialogTools {
             } catch (Exception ignored) {
             }
         });
+    }
+    /** 当前正在显示的审批窗口（用于超时时强制关闭）。 */
+    private static volatile JFrame activeApprovalFrame;
+
+    /** 最近一次审批是否因超时结束。 */
+    private static volatile boolean lastApprovalTimedOut;
+
+    /** 关闭当前审批窗口（工具超时或外部取消时调用）。 */
+    public static void closeApprovalWindow() {
+        JFrame frame = activeApprovalFrame;
+        activeApprovalFrame = null;
+        if (frame != null) {
+            SwingUtilities.invokeLater(frame::dispose);
+        }
+    }
+
+    /** 最近一次审批是否因超时结束。 */
+    public static boolean lastApprovalTimedOut() {
+        return lastApprovalTimedOut;
+    }
+
+    /**
+     * 工具专属审批窗口：倒计时与工具总超时一致，超时自动关闭并返回“未批准”。
+     *
+     * @param title   窗口标题（按工具定制）
+     * @param message 审批内容（操作对象、影响、风险等）
+     * @return true=用户批准；false=用户拒绝或超时未批准
+     */
+    public static boolean showApprovalDialog(String title, String message) {
+        lastApprovalTimedOut = false;
+        int initialSeconds = Math.max(1, ToolTimeoutContext.remainingSeconds());
+        CompletableFuture<Boolean> future = new CompletableFuture<>();
+        SwingUtilities.invokeLater(() -> {
+            try {
+                setupChineseFont();
+                JFrame frame = new JFrame(title);
+                frame.setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
+                frame.setResizable(false);
+                DialogUi.applyIcon(frame, "DialogTools");
+                activeApprovalFrame = frame;
+
+                JPanel mainPanel = new JPanel(new BorderLayout(10, 10));
+                mainPanel.setBorder(BorderFactory.createEmptyBorder(15, 15, 15, 15));
+                mainPanel.add(DialogUi.logoLabel(48), BorderLayout.WEST);
+
+                JTextArea messageArea = new JTextArea(message);
+                messageArea.setEditable(false);
+                messageArea.setLineWrap(true);
+                messageArea.setWrapStyleWord(true);
+                messageArea.setOpaque(false);
+                Font chineseFont = getChineseFont();
+                messageArea.setFont(chineseFont);
+                JScrollPane messageScroll = new JScrollPane(messageArea);
+                messageScroll.setBorder(null);
+                DialogUi.sizeMessageArea(messageArea, messageScroll, message);
+                mainPanel.add(messageScroll, BorderLayout.CENTER);
+
+                JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 0));
+                JButton approveButton = new JButton("批准执行");
+                JButton denyButton = new JButton("拒绝");
+                approveButton.setPreferredSize(new Dimension(110, 30));
+                denyButton.setPreferredSize(new Dimension(90, 30));
+                JLabel countdownLabel = new JLabel("审批剩余时间: " + initialSeconds
+                        + " 秒（与工具总超时一致，到点自动取消）");
+                countdownLabel.setForeground(new java.awt.Color(200, 30, 30));
+                buttonPanel.add(countdownLabel);
+                buttonPanel.add(denyButton);
+                buttonPanel.add(approveButton);
+                mainPanel.add(buttonPanel, BorderLayout.SOUTH);
+
+                final javax.swing.Timer[] holder = new javax.swing.Timer[1];
+                approveButton.addActionListener(e -> {
+                    if (holder[0] != null) {
+                        holder[0].stop();
+                    }
+                    activeApprovalFrame = null;
+                    if (!future.isDone()) {
+                        future.complete(true);
+                    }
+                    frame.dispose();
+                });
+                denyButton.addActionListener(e -> {
+                    if (holder[0] != null) {
+                        holder[0].stop();
+                    }
+                    activeApprovalFrame = null;
+                    if (!future.isDone()) {
+                        future.complete(false);
+                    }
+                    frame.dispose();
+                });
+                holder[0] = new javax.swing.Timer(500, e -> {
+                    int remaining = ToolTimeoutContext.remainingSeconds();
+                    if (remaining <= 0) {
+                        lastApprovalTimedOut = true;
+                        countdownLabel.setText("审批超时：工具已超时，操作未执行");
+                        if (holder[0] != null) {
+                            holder[0].stop();
+                        }
+                        activeApprovalFrame = null;
+                        if (!future.isDone()) {
+                            future.complete(false);
+                        }
+                        frame.dispose();
+                        return;
+                    }
+                    countdownLabel.setText("审批剩余时间: " + remaining
+                            + " 秒（与工具总超时一致，到点自动取消）");
+                });
+                holder[0].start();
+
+                frame.setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
+                frame.getRootPane().registerKeyboardAction(
+                        e -> denyButton.doClick(),
+                        KeyStroke.getKeyStroke("ESCAPE"),
+                        JComponent.WHEN_IN_FOCUSED_WINDOW);
+                frame.add(mainPanel);
+                setFontRecursively(frame, chineseFont);
+                DialogUi.fit(frame);
+                frame.addWindowListener(new WindowAdapter() {
+                    @Override
+                    public void windowClosed(WindowEvent e) {
+                        if (holder[0] != null) {
+                            holder[0].stop();
+                        }
+                        if (activeApprovalFrame == frame) {
+                            activeApprovalFrame = null;
+                        }
+                        if (!future.isDone()) {
+                            future.complete(false);
+                        }
+                    }
+                });
+                frame.setVisible(true);
+            } catch (Exception ex) {
+                future.completeExceptionally(ex);
+            }
+        });
+        try {
+            return future.get();
+        } catch (Exception e) {
+            return false;
+        }
     }
 }

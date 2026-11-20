@@ -10,11 +10,12 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 工作区根目录与修改权限管理。
+ * 工作区根目录与修改权限管理（会话级）。
  *
- * <p>工作区路径<b>不持久化</b>：只能来自启动参数 {@code --workspace <dir>}，
- * 或运行期通过 {@code dlqq_workspace_set} 动态设置（需用户 JFrame 审批）；
- * 未指定时使用进程启动目录（CWD）。</p>
+ * <p>每个会话（对话）拥有独立的工作区：路径<b>不持久化</b>，来自启动参数
+ * {@code --workspace <dir>} 或运行期 {@code dlqq_workspace_set}；未指定时使用进程 CWD。
+ * 会话标识由 {@link SessionScope} 维护，本类所有读写都作用于<b>当前请求所属会话</b>，
+ * 因此同一个服务进程可以同时服务多个对话而互不影响。</p>
  *
  * <p>修改权限持久化在工作区的 {@code .dlqq/settings/settings.properties}
  * （键 {@code workspace.write.mode}）：</p>
@@ -43,80 +44,50 @@ public final class Workspace {
     /** 完全权限：允许修改任意位置的文件 */
     public static final String PERMISSION_FULL = "full";
 
-    /** 工作区权限配置键 */
-    public static final String PERMISSION_KEY = "workspace.write.mode";
+    /** 资源权限配置键（替代旧的 workspace.write.mode） */
+    public static final String PERMISSION_KEY = "permission.resource.level";
+    /** 操作权限配置键（鼠标/键盘/屏幕/串口/BLE/WiFi/USB 等外设操作） */
+    public static final String OPERATION_PERMISSION_KEY = "permission.operation.level";
+    /** 旧的工作区写权限键：只做兼容读取，设置时自动从配置文件中清理 */
+    public static final String LEGACY_PERMISSION_KEY = "workspace.write.mode";
     /** 工作区内配置文件相对路径（与历史路径保持一致） */
     public static final String SETTINGS_RELATIVE_PATH = ".dlqq/settings/settings.properties";
-
-    private static volatile Path root = normalizeCwd();
-    private static volatile String source = SOURCE_CWD;
-    private static volatile String cliPath;
-    private static volatile String permission = PERMISSION_WORKSPACE;
 
     private Workspace() {
     }
 
     /**
-     * 初始化工作区（服务启动时调用一次）：优先启动参数，否则进程 CWD。
+     * 初始化默认基准工作区（服务启动时调用一次）：优先启动参数，否则进程 CWD。
      *
      * @param cliWorkspace 启动参数 --workspace 的值，可为 null
      */
-    public static synchronized void init(String cliWorkspace) {
-        cliPath = isBlank(cliWorkspace) ? null : cliWorkspace.trim();
-        if (cliPath != null) {
-            Path path = toExistingDirectory(cliPath);
-            if (path != null) {
-                root = path;
-                source = SOURCE_CLI;
-                reloadPermission();
-                return;
-            }
-        }
-        root = normalizeCwd();
-        source = SOURCE_CWD;
-        reloadPermission();
+    public static void init(String cliWorkspace) {
+        SessionScope.init(cliWorkspace);
     }
 
     /**
-     * 运行期设置工作区（不持久化；是否允许由调用方先做用户审批）。
+     * 运行期设置<b>当前会话</b>的工作区（不持久化；是否允许由调用方先做用户审批）。
      *
      * @param directory 已存在的绝对目录
      * @throws IllegalArgumentException 目录不存在或不是目录
      */
-    public static synchronized void setRoot(String directory) {
+    public static void setRoot(String directory) {
         Path path = toExistingDirectory(directory);
         if (path == null) {
             throw new IllegalArgumentException("工作区必须是已存在的绝对目录: " + directory);
         }
-        root = path;
-        source = SOURCE_RUNTIME;
-        reloadPermission();
+        SessionScope.setCurrentRoot(path, SOURCE_RUNTIME);
     }
 
-    /**
-     * 回退到启动参数指定的工作区（若有效），否则回退到进程 CWD。
-     */
-    public static synchronized void resetToDefault() {
-        if (cliPath != null) {
-            Path path = toExistingDirectory(cliPath);
-            if (path != null) {
-                root = path;
-                source = SOURCE_CLI;
-                reloadPermission();
-                return;
-            }
-        }
-        root = normalizeCwd();
-        source = SOURCE_CWD;
-        reloadPermission();
+    /** 把当前会话回退到启动参数指定的工作区（若有效），否则回退到进程 CWD。 */
+    public static void resetToDefault() {
+        SessionScope.resetCurrentToDefault();
     }
 
-    /** 已经确保过 .dlqq/.gitignore 的工作区（避免每次 getRoot 都做磁盘检查） */
-    private static String ensuredDlqqRoot;
-
-    /** 当前工作区根目录（绝对路径）。 */
+    /** 当前会话的工作区根目录（绝对路径）。 */
     public static Path getRoot() {
-        ensureDlqqMetadata();
+        Path root = SessionScope.currentRoot();
+        ensureDlqqMetadata(root);
         return root;
     }
 
@@ -125,15 +96,14 @@ public final class Workspace {
      *
      * <p>放在 getRoot() 里统一兜底：无论 .dlqq 是由日志初始化、缓存目录、
      * 设置文件还是后台程序目录首次创建，只要访问过工作区，就一定会补齐
-     * .gitignore，避免日志/缓存被误提交到 git。</p>
+     * .gitignore，避免日志/缓存被误提交到 git。检查结果按会话缓存。</p>
      */
-    private static void ensureDlqqMetadata() {
-        Path base = root;
+    private static void ensureDlqqMetadata(Path base) {
         if (base == null) {
             return;
         }
         String key = base.toAbsolutePath().toString();
-        if (key.equals(ensuredDlqqRoot)) {
+        if (key.equals(SessionScope.currentEnsuredRoot())) {
             return;
         }
         try {
@@ -154,30 +124,30 @@ public final class Workspace {
             } catch (Exception ignored) {
                 // 非 Windows 平台或文件系统不支持时忽略
             }
-            ensuredDlqqRoot = key;
+            SessionScope.setCurrentEnsuredRoot(key);
         } catch (Exception ignored) {
             // 只读工作区或权限不足时忽略，不影响主流程
         }
     }
 
-    /** 当前工作区来源说明。 */
+    /** 当前会话的工作区来源说明。 */
     public static String getSource() {
-        return source;
+        return SessionScope.currentSource();
     }
 
     /** 启动参数指定的工作区（未指定时返回 null）。 */
     public static String getCliPath() {
-        return cliPath;
+        return SessionScope.getBaseCliPath();
     }
 
-    /** 当前修改权限：readonly / workspace / approval / full。 */
+    /** 当前会话的修改权限：readonly / workspace / approval / full。 */
     public static String getPermission() {
-        return permission;
+        return SessionScope.currentPermission();
     }
 
     /** 修改权限的中文说明。 */
     public static String getPermissionLabel() {
-        switch (permission) {
+        switch (getPermission()) {
             case PERMISSION_READONLY:
                 return "只读模式（readonly）";
             case PERMISSION_FULL:
@@ -189,9 +159,9 @@ public final class Workspace {
         }
     }
 
-    /** 当前工作区的 settings.properties 路径（权限与其它配置都存这里）。 */
+    /** 当前会话工作区的 settings.properties 路径（权限与其它配置都存这里）。 */
     public static Path getSettingsFile() {
-        return root.resolve(SETTINGS_RELATIVE_PATH).normalize();
+        return SessionScope.currentRoot().resolve(SETTINGS_RELATIVE_PATH).normalize();
     }
 
     /** 当前工作区的权限配置文件路径（与 settings.properties 同一文件）。 */
@@ -199,9 +169,7 @@ public final class Workspace {
         return getSettingsFile();
     }
 
-    /**
-     * 校验是否为已存在的绝对目录（不改变当前工作区）。
-     */
+    /** 校验是否为已存在的绝对目录（不改变当前工作区）。 */
     public static boolean isValidDirectory(String directory) {
         return toExistingDirectory(directory) != null;
     }
@@ -210,6 +178,7 @@ public final class Workspace {
      * 把用户路径解析为绝对路径：空值返回工作区根目录；绝对路径原样规范化；相对路径基于工作区解析。
      */
     public static Path resolve(String path) {
+        Path root = SessionScope.currentRoot();
         if (isBlank(path)) {
             return root;
         }
@@ -217,16 +186,14 @@ public final class Workspace {
         return value.isAbsolute() ? value.normalize() : root.resolve(value).normalize();
     }
 
-    /** 路径是否位于当前工作区内。 */
+    /** 路径是否位于当前会话的工作区内。 */
     public static boolean isInside(Path path) {
-        return path.toAbsolutePath().normalize().startsWith(root);
+        return path.toAbsolutePath().normalize().startsWith(SessionScope.currentRoot());
     }
 
-    /**
-     * 该路径在当前权限模式下修改时是否需要弹窗审批（仅 approval 模式且在工作区外时为 true）。
-     */
+    /** 该路径在当前权限模式下修改时是否需要弹窗审批（仅 approval 模式且在工作区外时为 true）。 */
     public static boolean requiresApproval(Path path) {
-        return PERMISSION_APPROVAL.equals(permission) && !isInside(path);
+        return PERMISSION_APPROVAL.equals(getPermission()) && !isInside(path);
     }
 
     /**
@@ -237,7 +204,7 @@ public final class Workspace {
      */
     public static String checkWrite(Path path) {
         Path absolute = path.toAbsolutePath().normalize();
-        switch (permission) {
+        switch (getPermission()) {
             case PERMISSION_READONLY:
                 return "✗ 当前工作区为只读模式（readonly），禁止修改文件: " + absolute
                         + "\n可用 dlqq_workspace_permission_set 切换为 workspace、approval 或 full";
@@ -255,38 +222,146 @@ public final class Workspace {
     }
 
     /**
-     * 设置当前工作区的修改权限，并持久化到工作区的 settings.properties（UTF-8，保留其它配置与注释）。
+     * 设置当前会话工作区的修改权限，并持久化到该工作区的 settings.properties
+     * （UTF-8，保留其它配置与注释）。
      *
      * @param mode readonly / workspace / approval / full
      * @throws IllegalArgumentException 模式非法或写入配置失败
      */
-    public static synchronized void setPermission(String mode) {
+    public static void setPermission(String mode) {
         String normalized = normalizePermission(mode);
         if (normalized == null) {
             throw new IllegalArgumentException("权限模式必须是 readonly、workspace、approval 或 full: " + mode);
         }
         try {
             writeSettingsValue(getSettingsFile(), PERMISSION_KEY, normalized);
+            removeLegacyPermissionKey(getSettingsFile());
         } catch (IOException e) {
-            throw new IllegalArgumentException("写入工作区权限配置失败: " + e.getMessage());
+            throw new IllegalArgumentException("写入资源权限配置失败: " + e.getMessage());
         }
-        permission = normalized;
+        SessionScope.setCurrentPermission(normalized);
     }
 
-    /** 从当前工作区配置文件重新加载权限（文件不存在或非法时使用 workspace）。 */
-    private static void reloadPermission() {
-        permission = PERMISSION_WORKSPACE;
-        String value = readSettingsValue(getSettingsFile(), PERMISSION_KEY);
+    /** 当前会话的操作权限：readonly / approval / highrisk / full（缺省 approval）。 */
+    public static String getOperationPermission() {
+        String value = getSettingValue(OPERATION_PERMISSION_KEY);
         String normalized = normalizePermission(value);
-        if (normalized != null) {
-            permission = normalized;
+        return normalized == null ? PERMISSION_APPROVAL : normalized;
+    }
+
+    /** 操作权限的中文说明。 */
+    public static String getOperationPermissionLabel() {
+        switch (getOperationPermission()) {
+            case PERMISSION_READONLY:
+                return "只读（readonly）";
+            case PERMISSION_FULL:
+                return "完全权限（full）";
+            case "highrisk":
+                return "高危需批准（highrisk）";
+            default:
+                return "需要批准（approval）";
         }
+    }
+
+    /**
+     * 读取指定工作区目录配置的资源权限（用于工作区切换时的提权判断）。
+     *
+     * @param root 目标工作区根目录
+     * @return 资源权限；未配置时为默认值 approval
+     */
+    public static String getPermissionOf(Path root) {
+        if (root == null) {
+            return PERMISSION_APPROVAL;
+        }
+        Path settingsFile = root.resolve(SETTINGS_RELATIVE_PATH).normalize();
+        String value = readSettingsValue(settingsFile, PERMISSION_KEY);
+        String normalized = normalizePermission(value);
+        return normalized == null ? PERMISSION_APPROVAL : normalized;
+    }
+
+    /**
+     * 设置当前会话的操作权限并持久化。
+     *
+     * @param mode readonly / approval / highrisk / full
+     * @throws IllegalArgumentException 模式非法或写入失败
+     */
+    public static void setOperationPermission(String mode) {
+        String normalized = normalizeOperationPermission(mode);
+        if (normalized == null) {
+            throw new IllegalArgumentException("操作权限必须是 readonly、approval、highrisk 或 full: " + mode);
+        }
+        try {
+            writeSettingsValue(getSettingsFile(), OPERATION_PERMISSION_KEY, normalized);
+        } catch (IOException e) {
+            throw new IllegalArgumentException("写入操作权限配置失败: " + e.getMessage());
+        }
+    }
+
+    private static String normalizeOperationPermission(String mode) {
+        if (mode == null) {
+            return null;
+        }
+        switch (mode.trim().toLowerCase()) {
+            case "readonly":
+            case "approval":
+            case "highrisk":
+            case "full":
+                return mode.trim().toLowerCase();
+            default:
+                return null;
+        }
+    }
+
+    /** 从配置文件中移除旧键 workspace.write.mode（迁移用）。 */
+    private static void removeLegacyPermissionKey(Path settingsFile) throws IOException {
+        if (!Files.isRegularFile(settingsFile)) {
+            return;
+        }
+        java.util.List<String> lines = Files.readAllLines(settingsFile, StandardCharsets.UTF_8);
+        java.util.List<String> kept = new java.util.ArrayList<>(lines.size());
+        boolean changed = false;
+        for (String line : lines) {
+            String trimmed = line.trim();
+            if (trimmed.startsWith(LEGACY_PERMISSION_KEY + "=")) {
+                changed = true;
+                continue;
+            }
+            kept.add(line);
+        }
+        if (changed) {
+            Files.write(settingsFile, kept, StandardCharsets.UTF_8);
+        }
+    }
+
+    /** 当前会话标识（用于诊断输出）。 */
+    public static String getSessionId() {
+        return SessionScope.currentSessionId();
+    }
+
+    /** 当前活跃会话数（含默认会话）。 */
+    public static int getSessionCount() {
+        return SessionScope.sessionCount();
+    }
+
+    /** 会话 {@code _meta} 键名。 */
+    public static String getSessionMetaKey() {
+        return SessionScope.getMetaKey();
+    }
+
+    /** Agent {@code _meta} 键名。 */
+    public static String getSessionAgentMetaKey() {
+        return SessionScope.getAgentMetaKey();
+    }
+
+    /** 读取当前会话工作区配置值；文件或键不存在时返回 null。 */
+    public static String getSettingValue(String key) {
+        return readSettingsValue(getSettingsFile(), key);
     }
 
     /**
      * 按 UTF-8 行格式读取配置值；文件或键不存在时返回 null。
      */
-    private static String readSettingsValue(Path settingsFile, String key) {
+    static String readSettingsValue(Path settingsFile, String key) {
         if (!Files.isRegularFile(settingsFile)) {
             return null;
         }
@@ -309,7 +384,7 @@ public final class Workspace {
     /**
      * 按 UTF-8 行格式写入/更新配置键，保留其它行与注释。
      */
-    private static void writeSettingsValue(Path settingsFile, String key, String value) throws IOException {
+    static void writeSettingsValue(Path settingsFile, String key, String value) throws IOException {
         Path parent = settingsFile.getParent();
         if (parent != null) {
             Files.createDirectories(parent);
@@ -333,7 +408,7 @@ public final class Workspace {
         Files.write(settingsFile, lines, StandardCharsets.UTF_8);
     }
 
-    private static String normalizePermission(String mode) {
+    static String normalizePermission(String mode) {
         if (mode == null) {
             return null;
         }
@@ -347,10 +422,6 @@ public final class Workspace {
             default:
                 return null;
         }
-    }
-
-    private static Path normalizeCwd() {
-        return Paths.get(System.getProperty("user.dir")).toAbsolutePath().normalize();
     }
 
     private static Path toExistingDirectory(String value) {

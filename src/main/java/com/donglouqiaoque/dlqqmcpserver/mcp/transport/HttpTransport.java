@@ -1,6 +1,7 @@
 package com.donglouqiaoque.dlqqmcpserver.mcp.transport;
 
 import com.donglouqiaoque.dlqqmcpserver.mcp.protocol.JsonRpcMessage;
+import com.donglouqiaoque.dlqqmcpserver.utils.SessionScope;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.ToNumberPolicy;
@@ -332,19 +333,19 @@ public class HttpTransport implements McpTransport {
         logger.info("[HttpTransport] Received JSON-RPC request: method={}, id={}, isNotification={}",
                 request.getMethod(), request.getId(), request.isNotification());
 
-        // 会话管理：initialize 时发放 Mcp-Session-Id 并记录。
-        // 注意：实测 DSH 的客户端收到 404 不会自动重新 initialize，只会把错误抛给调用方，
-        // 因此这里不做强制校验（保持无状态兼容），仅记录未知会话，便于诊断。
+        // 协议会话管理：initialize 时发放 Mcp-Session-Id（仅用于协议与 SSE，不用于工作区隔离）。
+        // 工作区隔离只认 params._meta；没有 _meta 的客户端统一落到默认会话（兼容旧客户端）。
+        // 注意：实测 DSH 的客户端收到 404 不会自动重新 initialize，因此不做强制校验。
         if ("initialize".equals(request.getMethod())) {
-            String newSessionId = UUID.randomUUID().toString();
-            sessions.add(newSessionId);
-            exchange.getResponseHeaders().set("Mcp-Session-Id", newSessionId);
-            logger.info("[HttpTransport] Session created: {}", newSessionId);
+            String protocolSessionId = UUID.randomUUID().toString();
+            sessions.add(protocolSessionId);
+            exchange.getResponseHeaders().set("Mcp-Session-Id", protocolSessionId);
+            logger.info("[HttpTransport] Protocol session created: {}", protocolSessionId);
         } else {
-            String sessionId = exchange.getRequestHeaders().getFirst("Mcp-Session-Id");
-            if (sessionId != null && !sessions.contains(sessionId)) {
-                logger.info("[HttpTransport] Unknown session {} (method={}), accepted statelessly",
-                        sessionId, request.getMethod());
+            String headerSessionId = exchange.getRequestHeaders().getFirst("Mcp-Session-Id");
+            if (headerSessionId != null && !sessions.contains(headerSessionId)) {
+                logger.info("[HttpTransport] Unknown protocol session {} (method={}), accepted statelessly",
+                        headerSessionId, request.getMethod());
             }
         }
 
@@ -398,11 +399,11 @@ public class HttpTransport implements McpTransport {
     }
 
     private void handleDelete(HttpExchange exchange) throws IOException {
-        // 会话终止：移出会话表（后续同 ID 请求会得到 404）
+        // 协议会话终止：只移出 HTTP 协议会话表（_meta 会话由空闲回收负责）
         String sessionId = exchange.getRequestHeaders().getFirst("Mcp-Session-Id");
         if (sessionId != null) {
             sessions.remove(sessionId);
-            logger.info("[HttpTransport] Session terminated: {}", sessionId);
+            logger.info("[HttpTransport] Protocol session terminated: {}", sessionId);
         }
         sendEmpty(exchange, 200);
     }
@@ -492,10 +493,13 @@ public class HttpTransport implements McpTransport {
             if (params == null) {
                 params = new HashMap<>();
             }
+            // 会话标识：仅来自 params._meta（HTTP 的 Mcp-Session-Id 只用于协议会话，不用于工作区隔离）
+            String sessionId = SessionScope.resolveSessionId(params);
             JsonRpcMessage.Request request = new JsonRpcMessage.Request();
             request.setId(id);
             request.setMethod(method);
             request.setParams(params);
+            request.setSessionId(sessionId);
             return request;
         } catch (Exception e) {
             logger.error("[HttpTransport] JSON parse failed: {}, JSON: {}", e.getMessage(), json);

@@ -33,6 +33,7 @@
 24. **禁止硬编码本机路径**：文档、注释与示例里只能写通用形式（如 `<JDK25>`、`<项目目录>`），不得写死本机盘符路径；确需举例时用占位符。
 25. **写文件禁止用 shell 重定向**：创建或修改文本、代码、文档必须用规则 26 指定的 MCP 文件工具；禁止用 pwsh / cmd（`Set-Content`、`>` 重定向、`[IO.File]::WriteAllText`）改写文件。构建、渲染图片等由程序产出的文件除外。
 26. **所有文件与命令操作必须走 MCP 通道**：读写文件、修改文本、执行命令、构建发布一律调用本项目的 MCP 工具——读文件用 `dlqq_read_file` / `dlqq_search_text_in_file`，写文件用 `dlqq_create_file` / `dlqq_overwrite_file` / `dlqq_append_file` / `dlqq_replace_text_in_file` / `dlqq_replace_lines_in_file` 等，执行命令用 `dlqq_run_command`，构建用 `dlqq_build_project` / `dlqq_rebuild_project`；不得改用原生 `read`/`write`/`edit` 工具或 pwsh 绕过。MCP 工作区必须指向当前工程目录（`dlqq_workspace_set`）。
+27. **第三方库许可证审查**：新增依赖时优先选择 **MIT** 协议的库。若拟采用非 MIT 协议的库，必须**联网检索**该协议是否允许随本程序一起分发（bundling / redistribution）；确认允许方可引入。若检索结果表明不允许（或无法确认），**必须暂停并向用户说明**该库、版本、协议与限制，由用户决定是否采用，禁止自行添加。
 
 ## 二、运行环境要求
 
@@ -97,7 +98,7 @@
 
 ### HTTP（Streamable HTTP）方式
 
-先启动服务（一次启动可被多个客户端共用，服务端无鉴权、无会话状态）：
+先启动服务（一次启动可被多个客户端共用；服务端无鉴权，会话隔离按 `params._meta` 判定）：
 
 ```cmd
 java -jar dlqq_mcp_server.jar --transport http --port 49129 --path /mcp
@@ -192,41 +193,48 @@ src/main/resources/
 └── simplelogger.properties
 ```
 
-启动参数：`--transport http|stdio`、`--port N`（默认 49129）、`--path /mcp`、`--workspace <dir>`；默认 stdio。
+启动参数：`--transport http|stdio`、`--port N`（默认 49129）、`--path /mcp`、`--workspace <dir>`、
+`--session-meta-key <key>`（默认 `dsh/sessionId`）、`--session-agent-meta-key <key>`（默认 `dsh/agentId`）、
+`--session-idle-minutes <n>`（默认 30，`0` 不回收）；默认 stdio。
+
+单进程多会话：请求通过 `params._meta` 携带会话/Agent 标识，工作区与配置按会话隔离；
+没有 `_meta` 的客户端统一使用默认会话（兼容旧客户端）。HTTP 的 `Mcp-Session-Id` 只用于协议与 SSE。
+
+权限与超时：`permission.resource.level`（资源权限，默认 approval）与 `permission.operation.level`
+（操作权限，默认 approval）两套配置；旧 `workspace.write.mode` 已废弃。权限只能通过
+`dlqq_workspace_permission_set` 修改（降权直行、提权弹带倒计时审批；`set_mcp_properties` 拒绝权限键）。
+工作区切换始终需要审批；同工作区直接返回。工具总超时=审批+运行，默认 50 秒，可由
+`_meta["dlqq/toolTimeoutSeconds"]` 指定；超时立即关闭审批窗口并终止执行；`no_wait` 后台调用不受限。
+`.dlqq` 目录任何权限下都禁止 AI 修改。
 
 运行期目录（首次启动自动创建，已被 `.gitignore` 忽略）：工作区内 `.dlqq/log/{logger,stderr}`、`.dlqq/cache`、`.dlqq/settings/settings.properties`（工作区默认 = 进程 CWD）。
 
 ## 六、工具速查
 
-共 **169** 个工具（156 个常规工具 + 13 个 `dlqq_set_*_script`），实现见 `mcp/tools/`，逐个参数说明见 [README.md](README.md)。
+共 **159** 个工具，实现见 `mcp/tools/`，逐个参数说明见 [README.md](README.md)。
+构建/芯片/运行/调试等 13 个项目脚本工具与 13 个脚本路径设置工具已按权限架构**源码屏蔽**，
+`dlqq_test_hot_reload` 同样屏蔽；后台程序管理工具按新命名（`dlqq_kill_command` 等）。
 
 | 分组 | 数量 | 说明 |
 |------|------|------|
-| 文件操作 | 15 | 读写/创建/覆盖/追加/行级编辑/文本替换/复制移动重命名 |
+| 文件操作 | 19 | 读写/创建/覆盖/追加/行级编辑/文本替换/复制移动重命名/BOM/二进制 |
 | 目录操作 | 8 | mdir、mdirs、树形列出、递归复制等 |
-| 二进制 | 2 | HEX 读写 |
-| BOM | 2 | UTF-8 BOM 增删 |
 | 搜索 | 4 | 文件/目录/目录内文本/单文件文本 |
 | 对话框 | 3 | 文本输入、确认、文件选择（Swing） |
 | 串口 UART | 17 | 窗口 + 开关串口 + 收发 + 日志（Python 可选） |
 | BLE | 21 | 蓝牙 20 + 脚本释放 1（Python bleak + Socket） |
-| USB | 14 | usb4java，HID/CDC |
+| USB | 15 | usb4java，HID/CDC |
 | WiFi | 12 | netsh / nmcli，Java 原生 |
-| 鼠标 / 键盘 | 13 | `java.awt.Robot` 模拟 |
-| 屏幕截图 | 1 | `dlqq_capture_screen`（含鼠标光标绘制） |
-| 图片转换 | 1 | `dlqq_convert_image`（SVG/PNG/JPG/GIF/BMP，Batik 渲染 SVG） |
-| 时间 | 1 | `dlqq_get_current_time` |
-| 计算器 | 3 | 数学 / 程序 / 函数 |
-| 命令执行 | 3 | `dlqq_run_command`（cmd）、`dlqq_run_powershell`（PowerShell 5.1）、`dlqq_run_pwsh`（PowerShell 7），均含 JFrame 人工确认 |
-| Office | 2 | 读取转 Markdown、格式转换 |
-| 压缩解压 | 2 | zip4j + commons-compress |
-| MCP 数据/属性 | 15 | 版本信息（含编译进代码的真实构建时间）、热加载测试、动态工具管理（移除/刷新/恢复/直接调用）、工作区设置与权限（set/get/reset/permission）、属性读写、清理数据/缓存/日志 |
-| 项目脚本 | 15 | 构建/烧写/运行/调试 ＋ 脚本路径设置 |
-| 工具列表 | 1 | `dlqq_get_tool_list` |
+| 鼠标 / 键盘 / 屏幕 | 14 | `java.awt.Robot` 模拟 + `dlqq_capture_screen` |
+| 图片 / Office | 3 | 图片转换、Office 读取与转换 |
+| 时间 / 计算器 | 4 | 时间 1 + 计算器 3 |
+| 命令执行与后台程序 | 18 | 命令 3 + cmd/powershell/pwsh 各 5 个后台管理（`dlqq_kill_*` 等新命名） |
+| MCP 数据/属性 | 14 | 版本信息、动态工具管理（hide/show/refresh/reset/run）、工作区、属性读写、清理数据/缓存/日志 |
+| 工具列表 / 环境 | 2 | `dlqq_get_tool_list`、`dlqq_get_tools_env` |
 
-**动态工具管理**：`dlqq_mcp_remove_tools`（移除并持久化）、`dlqq_mcp_refresh_tools`（仅推送 `notifications/tools/list_changed`）、`dlqq_mcp_reset_tools`（恢复全部并清空配置）、`dlqq_mcp_run_tools`（按名称直接调用任意已注册工具，绕过“已移除/客户端未加载”限制）。排除项存于 `<工作区>/.dlqq/settings/settings.properties` 的 `mcp.tools.excluded`（逗号分隔），服务端重启后仍保持移除状态；这四个管理工具受保护，不允许被移除。HTTP 模式下立即刷新需要客户端已打开 SSE 长连接。
+**动态工具管理**：`dlqq_mcp_hide_tools`（隐藏并持久化）、`dlqq_mcp_show_tools`（恢复指定工具）、`dlqq_mcp_refresh_tools`（仅推送 `notifications/tools/list_changed`）、`dlqq_mcp_reset_tools`（恢复全部并清空配置）、`dlqq_mcp_run_tools`（按名称直接调用任意已注册工具）。排除项存于 `<工作区>/.dlqq/settings/settings.properties` 的 `mcp.tools.excluded`（逗号分隔），服务端重启后仍保持隐藏状态；管理工具受保护，不允许被隐藏。HTTP 模式下立即刷新需要客户端已打开 SSE 长连接。
 
-**工作区**：`dlqq_workspace_set` / `dlqq_workspace_get` / `dlqq_workspace_reset` / `dlqq_workspace_permission_set`；启动参数 `--workspace <dir>`。未指定且未运行期设置时，工作区 = 进程 CWD。**工作区路径不持久化**（仅 `--workspace` 或运行期设置，重启需重新指定）；修改权限和其它全部配置（`script.*`、`response.max.size`、`mcp.tools.excluded` 等）持久化在工作区内 `.dlqq/settings/settings.properties`，权限键为 `workspace.write.mode`（`readonly` 只读 / `workspace` 仅工作区 / `approval` 工作区外审批 / `full` 完全权限），切换工作区自动重载。所有工具的相对路径、脚本执行目录、AI 规则基准都基于工作区解析；工作区内 `.dlqq`（日志、缓存、配置）整个随工作区移动。
+**工作区**：`dlqq_workspace_set` / `dlqq_workspace_get` / `dlqq_workspace_reset` / `dlqq_workspace_permission_set` / `dlqq_get_cwd_path`；启动参数 `--workspace <dir>`。未指定且未运行期设置时，工作区 = 进程 CWD。**工作区路径不持久化**（仅 `--workspace` 或运行期设置，重启需重新指定）。权限分两套配置：`permission.resource.level`（资源权限）与 `permission.operation.level`（操作权限），旧 `workspace.write.mode` 已废弃；其它配置（`script.*`、`response.max.size`、`mcp.tools.excluded` 等）持久化在工作区内 `.dlqq/settings/settings.properties`，切换工作区自动重载。所有工具的相对路径、脚本执行目录、AI 规则基准都基于工作区解析；工作区内 `.dlqq`（日志、缓存、配置）整个随工作区移动，且 **AI 任何权限下都不能修改 `.dlqq`**。
 
 **脚本工具规则**：`dlqq_build_project` / `dlqq_rebuild_project` / `dlqq_chip_*` / `dlqq_*erase_download` / `dlqq_run_project` / `dlqq_debug_project` 等**没有任何内置默认脚本路径**；未配置时直接报错“需要先配置工具路径”，并提示对应的 `dlqq_set_*_script`。配置写入 `<工作区>/.dlqq/settings/settings.properties` 的 `script.*` 项。
 

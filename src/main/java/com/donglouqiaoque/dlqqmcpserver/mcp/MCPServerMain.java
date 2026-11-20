@@ -14,6 +14,7 @@ import java.awt.GraphicsEnvironment;
 import java.io.IOException;
 import com.donglouqiaoque.dlqqmcpserver.mcp.tools.McpTools;
 import com.donglouqiaoque.dlqqmcpserver.utils.Workspace;
+import com.donglouqiaoque.dlqqmcpserver.utils.SessionScope;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.FileWriter;
@@ -107,6 +108,12 @@ public class MCPServerMain {
     private static String httpPath = "/mcp";
     /** 启动参数指定的工作区目录（--workspace） */
     private static String workspacePath = null;
+    /** 启动参数指定的会话标识键（--session-meta-key，默认 dsh/sessionId） */
+    private static String sessionMetaKey = null;
+    /** 启动参数指定的 Agent 标识键（--session-agent-meta-key，默认 dsh/agentId） */
+    private static String sessionAgentMetaKey = null;
+    /** 启动参数指定的会话空闲回收分钟数（--session-idle-minutes，默认 30，0 = 不回收） */
+    private static int sessionIdleMinutes = 30;
 
     /**
      * 初始化 Swing 外观（FlatLaf 深色主题），作用于所有工具窗口与对话框。
@@ -126,11 +133,16 @@ public class MCPServerMain {
     }
 
     public static void main(String[] args) {
-        // 解析命令行参数（--transport http|stdio, --port N, --path /mcp, --workspace <dir>）
+        // 解析命令行参数（--transport http|stdio, --port N, --path /mcp, --workspace <dir>,
+        // --session-meta-key <key>, --session-agent-meta-key <key>, --session-idle-minutes <n>）
         parseArgs(args);
 
         // 初始化工作区：--workspace > 进程 CWD（工作区路径不持久化）
         Workspace.init(workspacePath);
+
+        // 配置会话隔离参数（单进程多会话 × 多 Agent）并启动空闲会话回收线程
+        SessionScope.configure(sessionMetaKey, sessionAgentMetaKey, sessionIdleMinutes);
+        SessionScope.startSweeper();
 
         // 设置UTF-8编码
         System.setProperty("file.encoding", "UTF-8");
@@ -183,7 +195,8 @@ public class MCPServerMain {
     
     /**
      * 解析命令行参数
-     * 支持: --transport http|stdio, --port N, --path /mcp, --workspace <dir>
+     * 支持: --transport http|stdio, --port N, --path /mcp, --workspace <dir>,
+     *       --session-meta-key <key>, --session-idle-minutes <n>
      */
     private static void parseArgs(String[] args) {
         for (int i = 0; i < args.length; i++) {
@@ -218,6 +231,25 @@ public class MCPServerMain {
                 case "--workspace":
                     if (i + 1 < args.length) {
                         workspacePath = args[++i];
+                    }
+                    break;
+                case "--session-meta-key":
+                    if (i + 1 < args.length) {
+                        sessionMetaKey = args[++i];
+                    }
+                    break;
+                case "--session-agent-meta-key":
+                    if (i + 1 < args.length) {
+                        sessionAgentMetaKey = args[++i];
+                    }
+                    break;
+                case "--session-idle-minutes":
+                    if (i + 1 < args.length) {
+                        try {
+                            sessionIdleMinutes = Integer.parseInt(args[++i]);
+                        } catch (NumberFormatException e) {
+                            logger.warn("[MCPServerMain] Invalid session idle minutes: {}, using default 30", args[i]);
+                        }
                     }
                     break;
                 default:

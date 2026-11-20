@@ -1,9 +1,10 @@
 package com.donglouqiaoque.dlqqmcpserver.mcp.tools;
 
+import com.donglouqiaoque.dlqqmcpserver.mcp.policy.ToolApprovals;
 import com.donglouqiaoque.dlqqmcpserver.utils.AIRulesUtils;
+import com.donglouqiaoque.dlqqmcpserver.utils.FileAccessGuard;
 import com.donglouqiaoque.dlqqmcpserver.utils.FileUtils;
 import com.donglouqiaoque.dlqqmcpserver.utils.Workspace;
-
 import javax.swing.*;
 import java.awt.BorderLayout;
 import java.awt.FlowLayout;
@@ -120,6 +121,23 @@ public class FileTools {
     private static void resetFileModified(String filePath) {
         String normalizedPath = FileUtils.normalizePath(filePath);
         fileModifiedFlag.remove(normalizedPath);
+    }
+    /**
+     * 高危工具专属审批：内置窗口工具直接放行，其余工具弹该工具专属审批窗口。
+     *
+     * @param toolName  工具名（决定窗口标题与内容）
+     * @param keyValues 成对的参数键值（用于审批窗口展示）
+     * @return null 表示允许执行；否则为取消文本
+     */
+    private static String requireToolApproval(String toolName, String... keyValues) {
+        Map<String, Object> arguments = new HashMap<>();
+        for (int i = 0; i + 1 < keyValues.length; i += 2) {
+            arguments.put(keyValues[i], keyValues[i + 1]);
+        }
+        if (ToolApprovals.confirm(toolName, arguments)) {
+            return null;
+        }
+        return ToolApprovals.cancelledMessage(toolName);
     }
 
     /**
@@ -523,6 +541,8 @@ public class FileTools {
 
         // 使用 FileChannel 以共享模式读取文件，避免多进程竞争
         List<String> lines = readAllLinesWithSharedLock(path, cs, filePath);
+        // 登记读取快照：后续文本写入以此判断是否需要重新读取
+        FileAccessGuard.recordRead(path);
         if (lines.isEmpty()) {
             return "";
         }
@@ -666,6 +686,11 @@ public class FileTools {
      * @throws IOException 写入异常
      */
     private static void writeFileWithBomControl(Path path, String content, Charset charset, String filePathForBomCheck) throws IOException {
+        // 读取前置校验：必须先读取，且读取后文件未被外部修改
+        String guardError = FileAccessGuard.checkBeforeWrite(path, FileAccessGuard.Mode.TEXT, "写入文件");
+        if (guardError != null) {
+            throw new IOException(guardError);
+        }
         // 检查是否需要写入 BOM
         boolean shouldWriteBom = filePathForBomCheck != null && hasFileBom(filePathForBomCheck);
 
@@ -681,6 +706,8 @@ public class FileTools {
             // 不需要写入 BOM，使用标准方法
             Files.writeString(path, content, charset);
         }
+        // 写入成功：刷新记录，允许后续连续写入
+        FileAccessGuard.afterWrite(path, FileAccessGuard.Mode.TEXT);
     }
 
     /**
@@ -688,6 +715,11 @@ public class FileTools {
      * 注意：追加模式只在文件开头写入BOM（当文件为空时）
      */
     private static void writeFileWithBomControlAppend(Path path, String content, Charset charset, String filePathForBomCheck) throws IOException {
+        // 读取前置校验：必须先读取，且读取后文件未被外部修改
+        String guardError = FileAccessGuard.checkBeforeWrite(path, FileAccessGuard.Mode.TEXT, "追加写入文件");
+        if (guardError != null) {
+            throw new IOException(guardError);
+        }
         boolean fileExists = Files.exists(path);
         boolean isEmpty = !fileExists || Files.size(path) == 0;
         boolean shouldWriteBom = isEmpty && filePathForBomCheck != null && hasFileBom(filePathForBomCheck);
@@ -704,6 +736,8 @@ public class FileTools {
             // 标准追加模式
             Files.writeString(path, content, charset, StandardOpenOption.APPEND);
         }
+        // 写入成功：刷新记录，允许后续连续写入
+        FileAccessGuard.afterWrite(path, FileAccessGuard.Mode.TEXT);
     }
 
     /**
@@ -762,14 +796,6 @@ public class FileTools {
         }
         // 根据原文件 BOM 状态写入
         writeFileWithBomControl(path, result.toString(), charset, filePath);
-    }
-
-    /**
-     * 将行列表写回文件，保留文件原始的换行符结尾特性（兼容旧调用，不带 BOM 控制）
-     * @deprecated 请使用带 filePath 参数的版本以支持 BOM 控制
-     */
-    private static void writeLinesToFile(Path path, List<String> lines, boolean endsWithNewline, Charset charset) throws IOException {
-        writeLinesToFile(path, lines, endsWithNewline, charset, null);
     }
 
     // ========== ANSI 颜色代码 ==========
@@ -2570,6 +2596,8 @@ public class FileTools {
         if (!Files.isRegularFile(path)) {
             throw new IOException("路径不是文件: " + filePath);
         }
+        // 登记二进制读取快照：后续二进制写入以此判断是否需要重新读取
+        FileAccessGuard.recordReadBinary(path);
 
         long fileSize = Files.size(path);
 
@@ -2627,6 +2655,11 @@ public class FileTools {
         if (permissionError != null) {
             throw new IOException(permissionError);
         }
+        // 二进制写入前置校验：必须已二进制读取，且读取后文件未被外部修改
+        String guardError = FileAccessGuard.checkBeforeWrite(path, FileAccessGuard.Mode.BINARY, "写入二进制文件");
+        if (guardError != null) {
+            throw new IOException(guardError);
+        }
 
         // 确保父目录存在
         Path parent = path.getParent();
@@ -2661,6 +2694,8 @@ public class FileTools {
             // 覆盖写入
             Files.write(path, data);
         }
+        // 写入成功：刷新二进制记录
+        FileAccessGuard.afterWrite(path, FileAccessGuard.Mode.BINARY);
     }
 
     // ==================== 搜索工具 ====================
@@ -3180,6 +3215,8 @@ public class FileTools {
     private static void searchInFile(Path file, Pattern regex, String searchPattern,
                                      boolean useRegex, boolean ignoreCase,
                                      List<TextSearchResult> results) throws IOException {
+        // 搜索也算读取：登记快照，后续文本写入以此为基准
+        FileAccessGuard.recordRead(file);
         // 使用流式读取，避免大文件导致内存溢出
         List<String> contextBuffer = new ArrayList<>(); // 保存前后3行上下文
         int lineNumber = 0;

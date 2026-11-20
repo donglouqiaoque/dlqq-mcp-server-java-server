@@ -33,6 +33,7 @@
 24. **No hard-coded local paths**: documentation, comments and examples must use generic forms such as `<JDK25>` or `<project dir>`; never embed a local drive-letter path. Use placeholders when an example is needed.
 25. **Never write files through shell redirection**: create or modify text, code and docs with the MCP file tools required by rule 26. Never use pwsh / cmd (`Set-Content`, `>` redirection, `[IO.File]::WriteAllText`). Files produced by programs (build output, rendered images, ...) are exempt.
 26. **All file and command operations must go through the MCP channel**: reading/writing files, editing text, running commands and building must always call this project's MCP tools — `dlqq_read_file` / `dlqq_search_text_in_file` to read, `dlqq_create_file` / `dlqq_overwrite_file` / `dlqq_append_file` / `dlqq_replace_text_in_file` / `dlqq_replace_lines_in_file` to write, `dlqq_run_command` to run commands, `dlqq_build_project` / `dlqq_rebuild_project` to build. Do not fall back to the native `read`/`write`/`edit` tools or pwsh. The MCP workspace must point at the current project directory (`dlqq_workspace_set`).
+27. **Third-party license review**: prefer libraries under the **MIT** license. For any non-MIT library, you must **search the web** to confirm whether its license permits bundling/redistribution with this program; only then may it be added. If the license does not permit it (or cannot be confirmed), **stop and report** the library, version, license and restrictions to the user, and let the user decide — never add it unilaterally.
 
 ## 2. Runtime requirements
 
@@ -191,41 +192,52 @@ src/main/resources/
 └── simplelogger.properties
 ```
 
-Startup arguments: `--transport http|stdio`, `--port N` (default 49129), `--path /mcp`, `--workspace <dir>`; stdio is the default.
+Startup arguments: `--transport http|stdio`, `--port N` (default 49129), `--path /mcp`, `--workspace <dir>`,
+`--session-meta-key <key>` (default `dsh/sessionId`), `--session-agent-meta-key <key>` (default `dsh/agentId`),
+`--session-idle-minutes <n>` (default 30, `0` disables); stdio is the default.
+
+Multi-session in one process: requests carry a session/agent identity in `params._meta`; the
+workspace and settings are isolated per session. Clients without `_meta` share the default
+session (legacy compatibility). HTTP `Mcp-Session-Id` serves the protocol and SSE only.
+
+Permissions and timeouts: `permission.resource.level` (resource, default approval) and
+`permission.operation.level` (operation, default approval); the legacy `workspace.write.mode` is
+gone. Permissions can only be changed via `dlqq_workspace_permission_set` (downgrade executes
+directly, escalation shows a countdown approval; `set_mcp_properties` rejects permission keys).
+Workspace switching always requires approval; the same workspace returns immediately. The tool
+total timeout = approval + execution, default 50 s, overridable with
+`_meta["dlqq/toolTimeoutSeconds"]`; on timeout the approval window closes and execution is
+aborted; `no_wait` background calls are unbounded. AI can never modify anything under `.dlqq`.
 
 Runtime directories (created on first start, ignored by `.gitignore`): inside the workspace, `.dlqq/log/{logger,stderr}`, `.dlqq/cache` and `.dlqq/settings/settings.properties` (the workspace defaults to the process CWD).
 
 ## 6. Tool overview
 
-**169** tools in total (156 regular tools + 13 `dlqq_set_*_script` helpers). Implementations live in `mcp/tools/`; parameters are documented in [README.en.md](README.en.md).
+**159** tools in total. Implementations live in `mcp/tools/`; parameters are documented in [README.en.md](README.en.md).
+The 13 project-script tools (build/flash/run/debug) and the 13 script-path setters are **commented out at the source**
+per the permission architecture, and `dlqq_test_hot_reload` is shielded too; the background-program tools use the
+new names (`dlqq_kill_command`, ...).
 
 | Group | Count | Notes |
 |-------|-------|-------|
-| File operations | 15 | read/write/create/overwrite/append, line edits, text replace, copy/move/rename |
+| File operations | 19 | read/write/create/overwrite/append, line edits, text replace, copy/move/rename, BOM, binary |
 | Directory operations | 8 | mdir, mdirs, tree listing, recursive copy, ... |
-| Binary | 2 | hex read/write |
-| BOM | 2 | UTF-8 BOM add/remove |
 | Search | 4 | files, directories, text in a directory, text in one file |
 | Dialogs | 3 | text input, confirmation, file picker (Swing) |
 | Serial UART | 17 | window + open/close + send/receive + log (Python optional) |
 | BLE | 21 | 20 Bluetooth tools + 1 script release (Python bleak + socket) |
-| USB | 14 | usb4java, HID/CDC |
+| USB | 15 | usb4java, HID/CDC |
 | WiFi | 12 | netsh / nmcli, native Java |
-| Mouse / keyboard | 13 | `java.awt.Robot` |
-| Screenshot | 1 | `dlqq_capture_screen` (draws the mouse cursor) |
-| Image conversion | 1 | `dlqq_convert_image` (SVG/PNG/JPG/GIF/BMP, Batik renders SVG) |
-| Time | 1 | `dlqq_get_current_time` |
-| Calculators | 3 | math / programmer / function |
-| Command execution | 3 | `dlqq_run_command` (cmd), `dlqq_run_powershell` (PowerShell 5.1), `dlqq_run_pwsh` (PowerShell 7); all with JFrame confirmation |
-| Office | 2 | read to Markdown, format conversion |
-| Archive | 2 | zip4j + commons-compress |
-| MCP data/properties | 15 | version info (real build time compiled into the class), hot-reload check, dynamic tool management (remove/refresh/reset/run), workspace set/get/reset/permission, property read/write, cleanup of data/cache/logs |
-| Project scripts | 15 | build/flash/run/debug + script path setters |
-| Tool list | 1 | `dlqq_get_tool_list` |
+| Mouse / keyboard / screen | 14 | `java.awt.Robot` + `dlqq_capture_screen` |
+| Image / Office | 3 | image conversion, Office read and conversion |
+| Time / calculators | 4 | time 1 + calculators 3 |
+| Command execution & background | 18 | 3 command tools + 5 background managers per shell (new `dlqq_kill_*` names) |
+| MCP data/properties | 14 | version info, dynamic tool management (hide/show/refresh/reset/run), workspace, property read/write, cleanup of data/cache/logs |
+| Tool list / environment | 2 | `dlqq_get_tool_list`, `dlqq_get_tools_env` |
 
-**Dynamic tool management**: `dlqq_mcp_remove_tools` (remove and persist), `dlqq_mcp_refresh_tools` (push `notifications/tools/list_changed` only), `dlqq_mcp_reset_tools` (restore everything and clear the config), `dlqq_mcp_run_tools` (call any registered tool by name, bypassing the removed/not-loaded restriction). Exclusions are stored in `mcp.tools.excluded` (comma separated) in `<workspace>/.dlqq/settings/settings.properties` and survive a server restart; these four management tools are protected and cannot be removed. In HTTP mode an immediate refresh requires the client to hold an open SSE connection.
+**Dynamic tool management**: `dlqq_mcp_hide_tools` (hide and persist), `dlqq_mcp_show_tools` (restore specific tools), `dlqq_mcp_refresh_tools` (push `notifications/tools/list_changed` only), `dlqq_mcp_reset_tools` (restore everything and clear the config), `dlqq_mcp_run_tools` (call any registered tool by name). Exclusions are stored in `mcp.tools.excluded` (comma separated) in `<workspace>/.dlqq/settings/settings.properties` and survive a server restart; the management tools are protected. In HTTP mode an immediate refresh requires the client to hold an open SSE connection.
 
-**Workspace**: `dlqq_workspace_set` / `dlqq_workspace_get` / `dlqq_workspace_reset` / `dlqq_workspace_permission_set`, plus the `--workspace <dir>` startup argument. If neither is given, the workspace is the process CWD. **The workspace path is not persisted** (only `--workspace` or a runtime setting, so it must be set again after a restart); the write mode and all other settings (`script.*`, `response.max.size`, `mcp.tools.excluded`, ...) are persisted in `<workspace>/.dlqq/settings/settings.properties`. The write mode key is `workspace.write.mode` (`readonly`, `workspace`, `approval` for writes outside the workspace, `full`), and switching the workspace reloads it. Relative paths, script working directories and AI rule bases are resolved against the workspace; the workspace `.dlqq` directory (logs, cache, settings) moves with it.
+**Workspace**: `dlqq_workspace_set` / `dlqq_workspace_get` / `dlqq_workspace_reset` / `dlqq_workspace_permission_set` / `dlqq_get_cwd_path`, plus the `--workspace <dir>` startup argument. If neither is given, the workspace is the process CWD. **The workspace path is not persisted** (only `--workspace` or a runtime setting, so it must be set again after a restart). Permissions use two settings: `permission.resource.level` (resource) and `permission.operation.level` (operation); the legacy `workspace.write.mode` is gone. All other settings (`script.*`, `response.max.size`, `mcp.tools.excluded`, ...) are persisted in `<workspace>/.dlqq/settings/settings.properties`, and switching the workspace reloads them. Relative paths, script working directories and AI rule bases are resolved against the workspace; the workspace `.dlqq` directory (logs, cache, settings) moves with it and **AI can never modify `.dlqq` at any permission level**.
 
 **Script tool rules**: `dlqq_build_project` / `dlqq_rebuild_project` / `dlqq_chip_*` / `dlqq_*erase_download` / `dlqq_run_project` / `dlqq_debug_project` and friends have **no built-in default script paths**. When unconfigured they fail with "configure the tool path first" and point at the matching `dlqq_set_*_script`. Settings are written under `script.*` in `<workspace>/.dlqq/settings/settings.properties`.
 

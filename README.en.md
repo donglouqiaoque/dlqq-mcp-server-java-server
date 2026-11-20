@@ -3,7 +3,7 @@
 A **Model Context Protocol (MCP) server** written in Java. It provides local tool capabilities to AI agents (DeepSeek Harness, Qwen Code, Claude Code, Cursor, Cline, VS Code, Windsurf, …): files, serial ports, BLE, USB, Wi-Fi, Office, ZIP, screenshots, image conversion, and more.
 
 - **Transport**: stdio (default) and Streamable HTTP
-- **Tools**: 169 (156 regular tools + 13 `dlqq_set_*_script` helpers)
+- **Tools**: 183 registered (plus 1 source-masked and 2 planned definitions — 185 in total); see [Tool risk levels and visibility](#tool-risk-levels-and-visibility)
 - **Runtime**: Java 25+ (**full JRE required**, see below)
 - **JAR name**: `dlqq_mcp_server.jar`
 
@@ -83,6 +83,9 @@ mvn clean package -DskipTests
 | `--port N` | HTTP port, default `49129` |
 | `--path /mcp` | HTTP path, default `/mcp` |
 | `--workspace <dir>` | Workspace root for all tool relative paths (highest priority) |
+| `--session-meta-key <key>` | `_meta` key for the conversation session id, default `dsh/sessionId` |
+| `--session-agent-meta-key <key>` | `_meta` key for the agent id, default `dsh/agentId` |
+| `--session-idle-minutes <n>` | Idle session reclamation in minutes, default 30; `0` disables |
 
 ### stdio (default)
 
@@ -99,7 +102,7 @@ java -Dfile.encoding=UTF-8 -jar dlqq_mcp_server.jar --transport http --port 4912
 - Endpoint: `http://127.0.0.1:49129/mcp`
 - Health check: `GET http://127.0.0.1:49129/mcp` → `{"status":"ok", ...}`
 - If the port is busy, the console asks for another port; **Enter** retries the default port; a non-interactive console exits with code 1.
-- The HTTP server is stateless and unauthenticated — clients only need the URL.
+- The HTTP server is unauthenticated; session isolation is driven by `params._meta` only (`Mcp-Session-Id` is for the protocol/SSE, not the workspace). Clients only need the URL.
 
 ### Deployment layout
 
@@ -296,6 +299,107 @@ The workspace affects relative paths in file/directory/search/binary/ZIP/Office/
 - The four management tools are protected and cannot be removed.
 - Over HTTP, immediate client refresh requires an open SSE stream (`GET /mcp` with `Accept: text/event-stream`); without SSE the change still applies and persists.
 - **Notification policy on connect**: the server does **not** push `notifications/tools/list_changed` immediately when a client connects. Only after `initialize` / `notifications/initialized`, if the client still has not requested `tools/list` within the delay (default **10 s**, configurable with `-Dmcp.listChanged.delay.ms=5000`), the server sends the notification once as a fallback. Any client message cancels it, and after `tools/list` it is never sent. A normal client that lists tools itself never receives it.
+
+## Permissions and timeouts
+
+### Two permission dimensions (the old workspace.write.mode is gone)
+
+| Setting | Meaning |
+|---|---|
+| `permission.resource.level` | **Resource permission**: files, directories, commands/processes, archives, MCP data |
+| `permission.operation.level` | **Operation permission**: mouse, keyboard, screen, serial, BLE, WiFi, USB |
+| `tool.policy.<tool>` | Per-tool override when the level is `custom` (allow / approve / deny) |
+
+Resource permission defaults to `approval` (outside-workspace operations need approval).
+Levels: `chat` < `readonly` < `workspace` < `approval` < `highrisk` < `full` < `custom`.
+
+Operation permission defaults to `approval` (needs approval).
+Levels: `readonly` < `approval` < `highrisk` < `full` < `custom`.
+
+- The legacy `workspace.write.mode` is deprecated: no longer read, and removed from the
+  settings file when the new keys are written;
+- AI can never modify anything under `.dlqq` (settings, logs, cache, scripts) at any permission level;
+- Permissions can only be changed through `dlqq_workspace_permission_set`
+  (`dlqq_set_mcp_properties` rejects permission-related keys).
+
+### Switching the workspace
+
+- `dlqq_workspace_set` / `dlqq_workspace_reset` are callable under **any** permission level;
+- Same target as the current workspace -> returns "no change" without any dialog;
+- Switching/resetting the workspace **always requires user approval** in a countdown dialog.
+
+### Escalation
+
+- Downgrade or same level: executed directly, no dialog;
+- Escalation: countdown approval dialog, auto-cancelled on timeout.
+
+### Tool timeouts
+
+- Client (DSH plugin) default per-call timeout: **60 s**, configurable via `toolCallTimeoutMs`;
+- Server-side total timeout = **approval time + execution time**, default **50 s**;
+- Override per call with `params._meta["dlqq/toolTimeoutSeconds"]` or `tool_timeout_seconds`;
+- Background calls (`no_wait=true`) return immediately and are not bounded by the total timeout;
+- On timeout the approval window is closed, execution is aborted and a clear error is returned;
+- Every approval window counts down the remaining tool time and auto-closes on timeout.
+
+## Multi-session in one process (session isolation)
+
+One server process serves many conversations and many agents; each session keeps its
+own workspace and configuration.
+
+### Session identity (stdio and HTTP alike)
+
+Only `params._meta` is used, sent by the client on every `tools/call`:
+
+| Key (default, configurable) | Meaning |
+|---|---|
+| `dsh/sessionId` (`--session-meta-key`) | Conversation/session id |
+| `dsh/agentId` (`--session-agent-meta-key`) | Agent id (root agent or subagent) |
+
+Resulting server-side session key:
+
+- both present → `session:<session>|agent:<agent>` (conversation × agent isolation);
+- session only → `session:<session>`;
+- agent only → `agent:<agent>`;
+- **neither → default session** (process-level, no multi-session split; keeps clients
+  that do not support multi-session fully compatible).
+
+HTTP `Mcp-Session-Id` is used for the protocol and SSE only and never drives the workspace.
+
+### Session-scoped state
+
+Each session owns:
+
+- its workspace root (`dlqq_workspace_set` / `dlqq_workspace_get` / `dlqq_workspace_reset`
+  affect only the current session);
+- its write permission (`workspace.write.mode`);
+- every `settings.properties` value under that workspace (script paths, search config,
+  properties, excluded tools, ...).
+
+Different conversations can therefore point at different projects without interfering.
+
+### Lifecycle
+
+| Event | Handling |
+|---|---|
+| A new session key first appears | Session created with the startup base workspace (`--workspace` or process CWD) |
+| Idle longer than `--session-idle-minutes` | Reclaimed by a background thread (default 30 min, `0` disables) |
+| HTTP `DELETE` | Removes the protocol session only; `_meta` sessions are reclaimed by the idle sweep |
+
+### Diagnostics
+
+`dlqq_workspace_get` reports the current session key, both meta key names, the live
+session count, and the current workspace and permission.
+
+### Client support (DSH)
+
+The official `@deepseek-ai/dsh-mcp-client` sends no `_meta`, so every conversation stays
+on the default session. Pair the server with `dlqq-mcp-server-dsh-client`, the DSH plugin
+fork in this project, which writes on every `tools/call`:
+
+```json
+"_meta": { "dsh/sessionId": "<session id>", "dsh/agentId": "<agent id>" }
+```
 
 ## Updating the JAR (hot reload)
 
@@ -658,8 +762,8 @@ Parameter lists below: `name` = required, `[name]` = optional. Path parameters a
 
 | Tool | Parameters | Notes |
 |------|------------|-------|
-| `dlqq_zip` | `source_paths`*, `[output_path]`, `[password]`, `[compression_level]`, `[format]` | Level 1–9; default output `.dlqq/cache` |
-| `dlqq_unzip` | `zip_path`*, `[output_dir]`, `[password]` | Password-protected ZIP supported |
+| `dlqq_zip` | `source_paths`*, `[output_path]`, `[password]`, `[compression_level]`, `[format]` | `zip` (multi-source, password, level 1–9) or `zstd` (single file → `.zst`, dir/multi → `.tar.zst`); default output `.dlqq/cache` |
+| `dlqq_unzip` | `zip_path`*, `[output_dir]`, `[password]`, `[detect_mode]` | Extracts zip/7z/tar/gz/bz2/xz/zstd/…; `detect_mode`: 0=strict suffix, 1=suffix then magic, 2=magic only |
 
 ### MCP data, properties & workspace tools (16)
 
@@ -791,6 +895,341 @@ Gitignore-style syntax (`*.log`, `build/`, `/config.txt`, `!important.log`, `**/
 - **Hardware tools** (serial/BLE/USB) need real hardware for end-to-end verification.
 - **GUI tools** (serial, BLE, Wi-Fi, command confirmation) need a desktop session; unavailable headless.
 - **Hot reload** – the JVM cannot reload classes; a JAR update needs a server restart, and tool changes also need a client restart (see “Updating the JAR”).
+
+## Tool risk levels and visibility
+
+### 1. Risk levels
+
+**Device resources** (files, directories, processes, permissions)
+
+| Level | Description |
+|---|---|
+| Safe | The tool does not affect any device resource. |
+| Risky | The tool affects device resources, but the impact is controllable and easy to recover. |
+| High-risk | The tool affects device resources, and the impact is unpredictable or hard to recover. |
+
+**Device peripherals** (mouse, keyboard, screen, Bluetooth, Wi-Fi, USB)
+
+| Level | Description |
+|---|---|
+| Safe | The tool does not affect any device peripheral. |
+| Risky | The tool affects device peripherals, but the impact is controllable and easy to recover. |
+| High-risk | The tool affects device peripherals, and the impact is unpredictable or hard to recover. |
+
+### 2. AI permission levels
+
+**Resources**
+
+| AI permission level | Safe tools | Risky tools | High-risk tools |
+|---|---|---|---|
+| Chat only | Denied | Denied | Denied |
+| Read-only | Allowed | Denied | Denied |
+| Modify inside workspace | Allowed | Allowed inside workspace, denied outside | Denied |
+| Approve outside workspace (default) | Allowed | Allowed inside, approval outside | Approval required inside and outside |
+| Approve high-risk tools | Allowed | Allowed | Approval required inside and outside |
+| Full access | Allowed | Allowed | Allowed |
+| Custom | Per config file | Per config file | Per config file |
+
+**Peripherals**
+
+| AI permission level | Safe tools | Risky tools | High-risk tools |
+|---|---|---|---|
+| Chat only | Denied | Denied | Denied |
+| Read-only | Allowed | Denied | Denied |
+| Approval required (default) | Allowed | Approval required | Approval required |
+| Approve high-risk tools | Allowed | Allowed | Approval required |
+| Full access | Allowed | Allowed | Allowed |
+| Custom | Per config file | Per config file | Per config file |
+
+**Resource areas**
+
+| Area | Path | Description | Access |
+|---|---|---|---|
+| Cache | `<workspace>/.dlqq/cache` | Temporary tool data | Read/write allowed |
+| Data | `<workspace>/.dlqq/data` | Long-term tool data | Read/write allowed |
+| External | Any directory | User-specified resource directory | Follows device resource permission |
+
+### 3. Visibility
+
+| State | Description |
+|---|---|
+| Full access | The AI agent can call the tool directly. |
+| View only | The AI agent can read the description, but any call is rejected. |
+| Hidden | The AI agent does not know the tool exists; it is not exposed by default. |
+| Source-masked | The source code is commented out; only a code change can enable it. |
+
+### 4. Tool inventory
+
+#### 4.1 File operations (19)
+
+| Tool | Resource risk | Peripheral risk | Default visibility |
+|---|---|---|---|
+| dlqq_read_file | Safe | Safe | Full access |
+| dlqq_read_bin_file | Safe | Safe | Full access |
+| dlqq_create_file | Risky | Safe | Full access |
+| dlqq_overwrite_file | High-risk | Safe | Full access |
+| dlqq_append_file | Risky | Safe | Full access |
+| dlqq_clear_file | High-risk | Safe | Full access |
+| dlqq_insert_text_in_file | Risky | Safe | Hidden |
+| dlqq_replace_text_in_file | Risky | Safe | Full access |
+| dlqq_replace_text_in_dir | High-risk | Safe | Full access |
+| dlqq_replace_lines_in_file | Risky | Safe | Hidden |
+| dlqq_remove_lines_in_file | Risky | Safe | Hidden |
+| dlqq_remove_text_in_file | Risky | Safe | Hidden |
+| dlqq_copy_file | Risky | Safe | Full access |
+| dlqq_move_file | High-risk | Safe | Full access |
+| dlqq_rename_file | Risky | Safe | Full access |
+| dlqq_delete_file | High-risk | Safe | Full access |
+| dlqq_write_bin_file | Risky | Safe | Full access |
+| dlqq_add_unicode_bom | Risky | Safe | Full access |
+| dlqq_remove_unicode_bom | Risky | Safe | Full access |
+
+#### 4.2 Directory operations (8)
+
+| Tool | Resource risk | Peripheral risk | Default visibility |
+|---|---|---|---|
+| dlqq_list_dir_files | Safe | Safe | Full access |
+| dlqq_list_dir_tree | Safe | Safe | Full access |
+| dlqq_mdir | Risky | Safe | Full access |
+| dlqq_mdirs | Risky | Safe | Full access |
+| dlqq_copy_dir | Risky | Safe | Full access |
+| dlqq_move_dir | High-risk | Safe | Full access |
+| dlqq_rename_dir | Risky | Safe | Full access |
+| dlqq_delete_dir | High-risk | Safe | Full access |
+
+#### 4.3 Search (4)
+
+| Tool | Resource risk | Peripheral risk | Default visibility |
+|---|---|---|---|
+| dlqq_search_file | Safe | Safe | Full access |
+| dlqq_search_dir | Safe | Safe | Full access |
+| dlqq_search_text_in_file | Safe | Safe | Full access |
+| dlqq_search_text_in_dir | Safe | Safe | Full access |
+
+#### 4.4 Archive (2)
+
+| Tool | Resource risk | Peripheral risk | Default visibility |
+|---|---|---|---|
+| dlqq_zip | High-risk | Safe | Full access |
+| dlqq_unzip | High-risk | Safe | Full access |
+
+#### 4.5 Commands and background programs (18)
+
+| Tool | Resource risk | Peripheral risk | Default visibility |
+|---|---|---|---|
+| dlqq_run_command | High-risk | Safe | Full access |
+| dlqq_run_powershell | High-risk | Safe | Full access |
+| dlqq_run_pwsh | High-risk | Safe | Full access |
+| dlqq_get_command_list | Safe | Safe | Full access |
+| dlqq_get_command_log | Safe | Safe | Full access |
+| dlqq_kill_command | High-risk | Safe | Full access |
+| dlqq_clear_command_list | Risky | Safe | Full access |
+| dlqq_refresh_command_list | Safe | Safe | Full access |
+| dlqq_get_powershell_list | Safe | Safe | Full access |
+| dlqq_get_powershell_log | Safe | Safe | Full access |
+| dlqq_kill_powershell | High-risk | Safe | Full access |
+| dlqq_clear_powershell_list | Risky | Safe | Full access |
+| dlqq_refresh_powershell_list | Safe | Safe | Full access |
+| dlqq_get_pwsh_list | Safe | Safe | Full access |
+| dlqq_get_pwsh_log | Safe | Safe | Full access |
+| dlqq_kill_pwsh | High-risk | Safe | Full access |
+| dlqq_clear_pwsh_list | Risky | Safe | Full access |
+| dlqq_refresh_pwsh_list | Safe | Safe | Full access |
+
+#### 4.6 Serial UART (17)
+
+| Tool | Resource risk | Peripheral risk | Default visibility |
+|---|---|---|---|
+| dlqq_run_uart | Safe | Risky | Full access |
+| dlqq_rerun_uart | Safe | Risky | Full access |
+| dlqq_exit_uart | Safe | Risky | Full access |
+| dlqq_uart_open_com | Safe | Risky | Full access |
+| dlqq_uart_close_com | Safe | Risky | Full access |
+| dlqq_uart_reopen_com | Safe | Risky | Full access |
+| dlqq_uart_refresh_com | Safe | Safe | Full access |
+| dlqq_uart_get_com | Safe | Safe | Full access |
+| dlqq_uart_send_text | Safe | Risky | Full access |
+| dlqq_uart_send_hex | Safe | Risky | Full access |
+| dlqq_uart_get_log | Safe | Safe | Full access |
+| dlqq_uart_get_log_text | Safe | Safe | Full access |
+| dlqq_uart_get_log_hex | Safe | Safe | Full access |
+| dlqq_uart_switch_text_hex | Safe | Safe | Full access |
+| dlqq_uart_clear_text | Safe | Safe | Full access |
+| dlqq_uart_get_line_count | Safe | Safe | Full access |
+| dlqq_uart_set_text_size | Safe | Safe | Full access |
+
+#### 4.7 Bluetooth BLE (21)
+
+| Tool | Resource risk | Peripheral risk | Default visibility |
+|---|---|---|---|
+| dlqq_run_ble | Safe | Risky | Full access |
+| dlqq_rerun_ble | Safe | Risky | Full access |
+| dlqq_exit_ble | Safe | Risky | Full access |
+| dlqq_ble_scan | Safe | Risky | Full access |
+| dlqq_ble_get_devices | Safe | Safe | Full access |
+| dlqq_ble_connect | Safe | Risky | Full access |
+| dlqq_ble_disconnect | Safe | Risky | Full access |
+| dlqq_ble_discover | Safe | Risky | Full access |
+| dlqq_ble_read | Safe | Safe | Full access |
+| dlqq_ble_write_text | Safe | Risky | Full access |
+| dlqq_ble_write_hex | Safe | Risky | Full access |
+| dlqq_ble_subscribe | Safe | Risky | Full access |
+| dlqq_ble_get_log | Safe | Safe | Full access |
+| dlqq_ble_get_log_text | Safe | Safe | Full access |
+| dlqq_ble_get_log_hex | Safe | Safe | Full access |
+| dlqq_ble_switch_text_hex | Safe | Safe | Full access |
+| dlqq_ble_clear | Safe | Safe | Full access |
+| dlqq_ble_get_line_count | Safe | Safe | Full access |
+| dlqq_ble_set_buffer_size | Safe | Safe | Full access |
+| dlqq_ble_release_script | Risky | Safe | Full access |
+| dlqq_check_bluetooth_open | Safe | Safe | Full access |
+
+#### 4.8 USB (15)
+
+| Tool | Resource risk | Peripheral risk | Default visibility |
+|---|---|---|---|
+| dlqq_run_usb | Safe | Risky | Full access |
+| dlqq_rerun_usb | Safe | Risky | Full access |
+| dlqq_exit_usb | Safe | Risky | Full access |
+| dlqq_usb_scan | Safe | Risky | Full access |
+| dlqq_usb_get_devices | Safe | Safe | Full access |
+| dlqq_usb_open | Safe | Risky | Full access |
+| dlqq_usb_close | Safe | Risky | Full access |
+| dlqq_usb_send_text | Safe | Risky | Full access |
+| dlqq_usb_send_hex | Safe | Risky | Full access |
+| dlqq_usb_get_log | Safe | Safe | Full access |
+| dlqq_usb_get_log_text | Safe | Safe | Full access |
+| dlqq_usb_get_log_hex | Safe | Safe | Full access |
+| dlqq_usb_switch_text_hex | Safe | Safe | Full access |
+| dlqq_usb_clear | Safe | Safe | Full access |
+| dlqq_usb_get_line_count | Safe | Safe | Full access |
+
+#### 4.9 Wi-Fi (12)
+
+| Tool | Resource risk | Peripheral risk | Default visibility |
+|---|---|---|---|
+| dlqq_run_wifi | Safe | Risky | Full access |
+| dlqq_rerun_wifi | Safe | Risky | Full access |
+| dlqq_exit_wifi | Safe | Risky | Full access |
+| dlqq_wifi_scan | Safe | Risky | Full access |
+| dlqq_wifi_get_networks | Safe | Safe | Full access |
+| dlqq_wifi_connect | Safe | Risky | Full access |
+| dlqq_wifi_disconnect | Safe | Risky | Full access |
+| dlqq_wifi_status | Safe | Safe | Full access |
+| dlqq_wifi_profiles | Safe | Safe | Full access |
+| dlqq_wifi_get_log | Safe | Safe | Full access |
+| dlqq_wifi_clear_log | Safe | Safe | Full access |
+| dlqq_wifi_get_line_count | Safe | Safe | Full access |
+
+#### 4.10 Mouse / keyboard / screen (14)
+
+| Tool | Resource risk | Peripheral risk | Default visibility |
+|---|---|---|---|
+| dlqq_mouse_move | Safe | Risky | Full access |
+| dlqq_mouse_click | Safe | Risky | Full access |
+| dlqq_mouse_press | Safe | Risky | Full access |
+| dlqq_mouse_release | Safe | Risky | Full access |
+| dlqq_mouse_drag | Safe | Risky | Full access |
+| dlqq_mouse_scroll | Safe | Risky | Full access |
+| dlqq_mouse_get_position | Safe | Safe | Full access |
+| dlqq_keyboard_type | Safe | Risky | Full access |
+| dlqq_keyboard_tap | Safe | Risky | Full access |
+| dlqq_keyboard_press | Safe | Risky | Full access |
+| dlqq_keyboard_release | Safe | Risky | Full access |
+| dlqq_keyboard_hotkey | Safe | Risky | Full access |
+| dlqq_keyboard_key_list | Safe | Safe | Full access |
+| dlqq_capture_screen | Risky | Risky | Full access |
+
+#### 4.11 Dialogs (3)
+
+| Tool | Resource risk | Peripheral risk | Default visibility |
+|---|---|---|---|
+| dlqq_dialog_text | Safe | Safe | Full access |
+| dlqq_dialog_check | Safe | Safe | Full access |
+| dlqq_dialog_file_path | Safe | Safe | Full access |
+
+#### 4.12 Image / Office conversion (3)
+
+| Tool | Resource risk | Peripheral risk | Default visibility |
+|---|---|---|---|
+| dlqq_convert_image | Risky | Safe | Full access |
+| dlqq_read_office_file | Risky | Safe | Full access |
+| dlqq_convert_office_file | Risky | Safe | Full access |
+
+#### 4.13 Time and calculators (4)
+
+| Tool | Resource risk | Peripheral risk | Default visibility |
+|---|---|---|---|
+| dlqq_get_current_time | Safe | Safe | Full access |
+| dlqq_calculator_math | Safe | Safe | Full access |
+| dlqq_calculator_programmer | Safe | Safe | Full access |
+| dlqq_calculator_function | Safe | Safe | Full access |
+
+#### 4.14 MCP management and introspection (14)
+
+| Tool | Resource risk | Peripheral risk | Default visibility |
+|---|---|---|---|
+| dlqq_get_mcp_version | Safe | Safe | Full access |
+| dlqq_get_mcp_properties | Safe | Safe | Full access |
+| dlqq_set_mcp_properties | Risky | Safe | Full access |
+| dlqq_reset_mcp_properties | Risky | Safe | Full access |
+| dlqq_mcp_hide_tools | High-risk | Safe | Full access |
+| dlqq_mcp_show_tools | High-risk | Safe | Full access |
+| dlqq_mcp_refresh_tools | Safe | Safe | Full access |
+| dlqq_mcp_reset_tools | High-risk | Safe | Full access |
+| dlqq_mcp_run_tools | High-risk | Safe | Full access |
+| dlqq_clear_mcp_cache | Risky | Safe | Full access |
+| dlqq_clear_mcp_data | High-risk | Safe | Full access |
+| dlqq_clear_mcp_log | Risky | Safe | Full access |
+| dlqq_test_hot_reload | Safe | Safe | Source-masked |
+| dlqq_get_tool_list | Safe | Safe | Full access |
+| dlqq_get_tools_env | Safe | Safe | Full access |
+
+#### 4.15 Workspace (5)
+
+| Tool | Resource risk | Peripheral risk | Default visibility |
+|---|---|---|---|
+| dlqq_workspace_set | High-risk | Safe | Full access |
+| dlqq_workspace_get | Safe | Safe | Full access |
+| dlqq_workspace_reset | High-risk | Safe | Full access |
+| dlqq_workspace_permission_set | High-risk | Safe | Full access |
+| dlqq_get_cwd_path | Safe | Safe | Full access |
+
+#### 4.16 Project scripts (execution, 13)
+
+| Tool | Resource risk | Peripheral risk | Default visibility |
+|---|---|---|---|
+| dlqq_build_project | High-risk | Safe | Source-masked |
+| dlqq_rebuild_project | High-risk | Safe | Source-masked |
+| dlqq_run_project | High-risk | Safe | Source-masked |
+| dlqq_debug_project | High-risk | Safe | Source-masked |
+| dlqq_chip_erase | High-risk | Safe | Source-masked |
+| dlqq_chip_download | High-risk | Safe | Source-masked |
+| dlqq_erase_download | High-risk | Safe | Source-masked |
+| dlqq_build_run_project | High-risk | Safe | Source-masked |
+| dlqq_build_debug_project | High-risk | Safe | Source-masked |
+| dlqq_build_erase_download | High-risk | Safe | Source-masked |
+| dlqq_rebuild_run_project | High-risk | Safe | Source-masked |
+| dlqq_rebuild_debug_project | High-risk | Safe | Source-masked |
+| dlqq_rebuild_erase_download | High-risk | Safe | Source-masked |
+
+#### 4.17 Project scripts (path settings, 13)
+
+| Tool | Resource risk | Peripheral risk | Default visibility |
+|---|---|---|---|
+| dlqq_set_build_script | Risky | Safe | Source-masked |
+| dlqq_set_rebuild_script | Risky | Safe | Source-masked |
+| dlqq_set_run_script | Risky | Safe | Source-masked |
+| dlqq_set_debug_script | Risky | Safe | Source-masked |
+| dlqq_set_chip_erase_script | Risky | Safe | Source-masked |
+| dlqq_set_chip_download_script | Risky | Safe | Source-masked |
+| dlqq_set_erase_download_script | Risky | Safe | Source-masked |
+| dlqq_set_build_run_script | Risky | Safe | Source-masked |
+| dlqq_set_build_debug_script | Risky | Safe | Source-masked |
+| dlqq_set_build_erase_download_script | Risky | Safe | Source-masked |
+| dlqq_set_rebuild_run_script | Risky | Safe | Source-masked |
+| dlqq_set_rebuild_debug_script | Risky | Safe | Source-masked |
+| dlqq_set_rebuild_erase_download_script | Risky | Safe | Source-masked |
 
 ## License
 
