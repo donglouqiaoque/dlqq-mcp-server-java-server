@@ -353,6 +353,11 @@ public final class Workspace {
         return SessionScope.getAgentMetaKey();
     }
 
+    /** 会话工作区 {@code _meta} 键名（客户端下发的会话 cwd 键）。 */
+    public static String getSessionWorkspaceMetaKey() {
+        return SessionScope.getWorkspaceMetaKey();
+    }
+
     /** 读取当前会话工作区配置值；文件或键不存在时返回 null。 */
     public static String getSettingValue(String key) {
         return readSettingsValue(getSettingsFile(), key);

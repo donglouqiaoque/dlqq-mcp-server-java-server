@@ -85,6 +85,7 @@ mvn clean package -DskipTests
 | `--workspace <dir>` | Workspace root for all tool relative paths (highest priority) |
 | `--session-meta-key <key>` | `_meta` key for the conversation session id, default `dsh/sessionId` |
 | `--session-agent-meta-key <key>` | `_meta` key for the agent id, default `dsh/agentId` |
+| `--session-workspace-meta-key <key>` | `_meta` key for the session workspace dir (cwd), default `dsh/workspace` |
 | `--session-idle-minutes <n>` | Idle session reclamation in minutes, default 30; `0` disables |
 
 ### stdio (default)
@@ -355,6 +356,7 @@ Only `params._meta` is used, sent by the client on every `tools/call`:
 |---|---|
 | `dsh/sessionId` (`--session-meta-key`) | Conversation/session id |
 | `dsh/agentId` (`--session-agent-meta-key`) | Agent id (root agent or subagent) |
+| `dsh/workspace` (`--session-workspace-meta-key`) | Session workspace dir (cwd); initialized on that session's first request (invalid/missing/`.dlqq` paths fall back silently) |
 
 Resulting server-side session key:
 
@@ -371,8 +373,10 @@ HTTP `Mcp-Session-Id` is used for the protocol and SSE only and never drives the
 Each session owns:
 
 - its workspace root (`dlqq_workspace_set` / `dlqq_workspace_get` / `dlqq_workspace_reset`
-  affect only the current session);
-- its write permission (`workspace.write.mode`);
+  affect only the current session; when not set explicitly it can be initialized from the
+  client-provided session cwd in `_meta` on the first request);
+- its resource permission (`permission.resource.level`) and operation permission
+  (`permission.operation.level`);
 - every `settings.properties` value under that workspace (script paths, search config,
   properties, excluded tools, ...).
 

@@ -4305,12 +4305,13 @@ public class AITools {
         ToolInputSchema inputSchema = new ToolInputSchema(properties, Collections.emptyList());
 
         server.addTool("dlqq_workspace_get",
-            "查看当前工作区目录、来源（启动参数 --workspace / 运行期设置 / 进程工作目录）、资源权限（chat/readonly/workspace/approval/highrisk/full）、操作权限（readonly/approval/highrisk/full）、权限配置文件与进程 CWD；并显示当前会话标识、会话键名、活跃会话数（单进程多会话 × 多 Agent）",
+            "查看当前工作区目录、来源（启动参数 --workspace / 运行期设置 / 进程工作目录 / 会话 cwd）、资源权限（chat/readonly/workspace/approval/highrisk/full）、操作权限（readonly/approval/highrisk/full）、权限配置文件与进程 CWD；并显示当前会话标识、会话键名、Agent 键名、工作区键名、活跃会话数（单进程多会话 × 多 Agent）",
             inputSchema,
             arguments -> textResult("工作区信息\n===================\n\n"
                     + "当前会话: " + Workspace.getSessionId() + "\n"
                     + "会话标识键: params._meta[" + Workspace.getSessionMetaKey() + "]\n"
                     + "Agent 标识键: params._meta[" + Workspace.getSessionAgentMetaKey() + "]\n"
+                    + "工作区标识键: params._meta[" + Workspace.getSessionWorkspaceMetaKey() + "]\n"
                     + "活跃会话数: " + Workspace.getSessionCount() + "\n"
                     + "当前工作区: " + Workspace.getRoot() + "\n"
                     + "来源: " + Workspace.getSource() + "\n"

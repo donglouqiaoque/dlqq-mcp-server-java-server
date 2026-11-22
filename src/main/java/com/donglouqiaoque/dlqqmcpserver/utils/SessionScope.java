@@ -44,11 +44,16 @@ public final class SessionScope {
     private static final String SOURCE_CLI = "--workspace argument";
 
     private static final String DEFAULT_AGENT_META_KEY = "dsh/agentId";
+    /** 会话工作区目录的 _meta 键（客户端携带会话 cwd，用于会话初始化工作区）。 */
+    private static final String DEFAULT_WORKSPACE_META_KEY = "dsh/workspace";
     /** 复合会话键最大长度（会话键 + Agent 键）。 */
     private static final int MAX_COMPOSITE_KEY_LENGTH = 512;
+    /** 工作区来源：由客户端 _meta 下发的会话 cwd 初始化。 */
+    private static final String SOURCE_HINT = "session cwd (params._meta)";
 
     private static volatile String metaKey = DEFAULT_META_KEY;
     private static volatile String agentMetaKey = DEFAULT_AGENT_META_KEY;
+    private static volatile String workspaceMetaKey = DEFAULT_WORKSPACE_META_KEY;
     private static volatile long idleMillis = DEFAULT_IDLE_MILLIS;
     private static volatile Path baseRoot = normalizeCwd();
     private static volatile String baseSource = SOURCE_CWD;
@@ -81,24 +86,30 @@ public final class SessionScope {
     /**
      * 配置会话参数（启动参数解析后调用）。
      *
-     * @param metaKeyOverride      会话键名，空值使用默认值
-     * @param agentMetaKeyOverride Agent 键名，空值使用默认值
-     * @param idleMinutes          空闲回收分钟数，0 表示不回收
+     * @param metaKeyOverride          会话键名，空值使用默认值
+     * @param agentMetaKeyOverride     Agent 键名，空值使用默认值
+     * @param workspaceMetaKeyOverride 会话工作区 _meta 键名，空值使用默认值
+     * @param idleMinutes              空闲回收分钟数，0 表示不回收
      */
-    public static void configure(String metaKeyOverride, String agentMetaKeyOverride, int idleMinutes) {
+    public static void configure(String metaKeyOverride, String agentMetaKeyOverride,
+                                 String workspaceMetaKeyOverride, int idleMinutes) {
         if (!isBlank(metaKeyOverride)) {
             metaKey = metaKeyOverride.trim();
         }
         if (!isBlank(agentMetaKeyOverride)) {
             agentMetaKey = agentMetaKeyOverride.trim();
         }
+        if (!isBlank(workspaceMetaKeyOverride)) {
+            workspaceMetaKey = workspaceMetaKeyOverride.trim();
+        }
         if (idleMinutes > 0) {
             idleMillis = idleMinutes * 60_000L;
         } else if (idleMinutes == 0) {
             idleMillis = Long.MAX_VALUE;
         }
-        logger.info("[SessionScope] Session meta key: {}, agent meta key: {}, idle timeout: {}",
-                metaKey, agentMetaKey, idleMillis == Long.MAX_VALUE ? "disabled" : (idleMillis / 60000L) + "min");
+        logger.info("[SessionScope] Session meta key: {}, agent meta key: {}, workspace meta key: {}, idle timeout: {}",
+                metaKey, agentMetaKey, workspaceMetaKey,
+                idleMillis == Long.MAX_VALUE ? "disabled" : (idleMillis / 60000L) + "min");
     }
 
     /** 启动后台线程回收空闲会话（只回收非默认会话）。 */
@@ -136,6 +147,90 @@ public final class SessionScope {
         session.lastAccess = System.currentTimeMillis();
         CURRENT.set(id);
         return previous;
+    }
+
+    /**
+     * 绑定当前线程到指定会话，并在会话首次出现时应用客户端下发的会话工作区。
+     *
+     * @param sessionId 会话标识，空值使用默认会话
+     * @param params    请求参数（用于读取 {@code _meta} 中的会话工作区）
+     * @return 绑定前的会话标识（用于退出时恢复），没有则为 null
+     */
+    public static String enter(String sessionId, Map<String, Object> params) {
+        String previous = enter(sessionId);
+        applyWorkspaceHint(params);
+        return previous;
+    }
+
+    /**
+     * 会话首次被访问时，用客户端 {@code _meta[workspaceMetaKey]} 下发的绝对目录初始化工作区。
+     * 每个会话只尝试一次；路径非法/不存在时静默回退到基准工作区。
+     */
+    @SuppressWarnings("unchecked")
+    private static void applyWorkspaceHint(Map<String, Object> params) {
+        Session session = currentSession();
+        if (session.workspaceHintApplied) {
+            return;
+        }
+        session.workspaceHintApplied = true;
+        Path hint = resolveWorkspaceHint(params);
+        if (hint == null || hint.equals(session.root)) {
+            return;
+        }
+        session.root = hint;
+        session.source = SOURCE_HINT;
+        session.ensuredRoot = null;
+        session.permission = loadPermission(hint);
+        logger.info("[SessionScope] Session workspace initialized from _meta: {} (source: {}, session: {})",
+                hint, SOURCE_HINT, session.id);
+    }
+
+    /** 从 params._meta 中解析并校验会话工作区目录；非法时返回 null。 */
+    @SuppressWarnings("unchecked")
+    private static Path resolveWorkspaceHint(Map<String, Object> params) {
+        if (params == null || isBlank(workspaceMetaKey)) {
+            return null;
+        }
+        Object metaRaw = params.get("_meta");
+        if (!(metaRaw instanceof Map<?, ?> meta)) {
+            return null;
+        }
+        Object value = ((Map<String, Object>) meta).get(workspaceMetaKey);
+        if (value == null) {
+            return null;
+        }
+        String text = String.valueOf(value).trim();
+        if (text.isEmpty()) {
+            return null;
+        }
+        // .dlqq 目录（配置/日志/缓存/脚本）不允许作为工作区
+        for (String segment : text.replace('\\', '/').split("/")) {
+            if (".dlqq".equalsIgnoreCase(segment.trim())) {
+                logger.warn("[SessionScope] Reject session workspace hint under .dlqq: {}", text);
+                return null;
+            }
+        }
+        try {
+            Path path = Paths.get(text);
+            if (!path.isAbsolute()) {
+                logger.warn("[SessionScope] Reject non-absolute session workspace hint: {}", text);
+                return null;
+            }
+            path = path.normalize();
+            if (!java.nio.file.Files.isDirectory(path)) {
+                logger.warn("[SessionScope] Session workspace hint is not a directory: {}", text);
+                return null;
+            }
+            return path;
+        } catch (RuntimeException e) {
+            logger.warn("[SessionScope] Invalid session workspace hint: {} ({})", text, e.getMessage());
+            return null;
+        }
+    }
+
+    /** 当前会话工作区 {@code _meta} 键名。 */
+    public static String getWorkspaceMetaKey() {
+        return workspaceMetaKey;
     }
 
     /**
@@ -379,6 +474,8 @@ public final class SessionScope {
         private volatile String permission;
         private volatile String ensuredRoot;
         private volatile long lastAccess;
+        /** 是否已尝试应用客户端下发的会话工作区（每个会话只尝试一次）。 */
+        private volatile boolean workspaceHintApplied;
 
         private Session(String id) {
             this.id = id;

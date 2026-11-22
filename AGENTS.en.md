@@ -194,11 +194,15 @@ src/main/resources/
 
 Startup arguments: `--transport http|stdio`, `--port N` (default 49129), `--path /mcp`, `--workspace <dir>`,
 `--session-meta-key <key>` (default `dsh/sessionId`), `--session-agent-meta-key <key>` (default `dsh/agentId`),
-`--session-idle-minutes <n>` (default 30, `0` disables); stdio is the default.
+`--session-workspace-meta-key <key>` (default `dsh/workspace`), `--session-idle-minutes <n>` (default 30,
+`0` disables); stdio is the default.
 
 Multi-session in one process: requests carry a session/agent identity in `params._meta`; the
 workspace and settings are isolated per session. Clients without `_meta` share the default
 session (legacy compatibility). HTTP `Mcp-Session-Id` serves the protocol and SSE only.
+On a session's first request the server may initialize that session's workspace from
+`_meta`'s session workspace (default key `dsh/workspace`, an absolute directory); an invalid,
+missing or `.dlqq`-nested path silently falls back to the default workspace.
 
 Permissions and timeouts: `permission.resource.level` (resource, default approval) and
 `permission.operation.level` (operation, default approval); the legacy `workspace.write.mode` is

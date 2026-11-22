@@ -320,8 +320,9 @@ public class McpServer {
      */
     private void handleMessage(JsonRpcMessage.Request request) {
         String method = request.getMethod();
-        // 会话绑定：单进程多会话隔离的统一入口（stdio / http 由传输层解析出 sessionId）
-        String previousSession = SessionScope.enter(request.getSessionId());
+        // 会话绑定：单进程多会话隔离的统一入口（stdio / http 由传输层解析出 sessionId）；
+        // 会话首次出现时同时应用客户端在 _meta 中下发的会话工作区目录
+        String previousSession = SessionScope.enter(request.getSessionId(), request.getParams());
         try {
             onClientActivity(method);
             logger.info("[McpServer.handleMessage] Received request: method={}, id={}, session={}, isNotification={}",

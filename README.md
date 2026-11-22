@@ -814,6 +814,7 @@ claude mcp add --transport http dlqq-mcp-server http://127.0.0.1:49129/mcp
 | `--workspace <dir>` | 工作区目录：所有工具的相对路径基于它解析（仅本次运行有效，不持久化） |
 | `--session-meta-key <key>` | 会话隔离使用的 `params._meta` 键名，默认 `dsh/sessionId` |
 | `--session-agent-meta-key <key>` | Agent 隔离使用的 `params._meta` 键名，默认 `dsh/agentId` |
+| `--session-workspace-meta-key <key>` | 会话工作目录（cwd）的 `params._meta` 键名，默认 `dsh/workspace` |
 | `--session-idle-minutes <n>` | 空闲会话回收时间（分钟），默认 30；`0` 表示不回收 |
 
 #### STDIO（默认）
@@ -2864,6 +2865,7 @@ settings.json
 |---|---|
 | `dsh/sessionId`（`--session-meta-key`） | 对话/会话 ID |
 | `dsh/agentId`（`--session-agent-meta-key`） | Agent ID（主 Agent / 子 Agent） |
+| `dsh/workspace`（`--session-workspace-meta-key`） | 会话工作目录（cwd）：服务端在该会话首次收到请求时用它初始化会话工作区（不存在/非法/在 `.dlqq` 下则静默回退） |
 
 服务端会话键：
 
@@ -2878,8 +2880,9 @@ HTTP 的 `Mcp-Session-Id` 只用于协议与 SSE，**不参与工作区隔离**�
 
 每个会话独立维护：
 
-- 工作区根目录（`dlqq_workspace_set` / `dlqq_workspace_get` / `dlqq_workspace_reset` 只影响当前会话）；
-- 修改权限（`workspace.write.mode`）；
+- 工作区根目录（`dlqq_workspace_set` / `dlqq_workspace_get` / `dlqq_workspace_reset` 只影响当前会话；
+  未显式设置时可由客户端 `_meta` 的会话 cwd 在首个请求时初始化）；
+- 资源权限（`permission.resource.level`）与操作权限（`permission.operation.level`）；
 - 会话工作区下的全部 `settings.properties` 配置（脚本路径、搜索配置、属性、排除工具等）。
 
 因此不同对话可以分别指向不同项目目录，互不干扰。

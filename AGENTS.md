@@ -195,10 +195,13 @@ src/main/resources/
 
 启动参数：`--transport http|stdio`、`--port N`（默认 49129）、`--path /mcp`、`--workspace <dir>`、
 `--session-meta-key <key>`（默认 `dsh/sessionId`）、`--session-agent-meta-key <key>`（默认 `dsh/agentId`）、
-`--session-idle-minutes <n>`（默认 30，`0` 不回收）；默认 stdio。
+`--session-workspace-meta-key <key>`（默认 `dsh/workspace`）、`--session-idle-minutes <n>`（默认 30，`0` 不回收）；
+默认 stdio。
 
 单进程多会话：请求通过 `params._meta` 携带会话/Agent 标识，工作区与配置按会话隔离；
 没有 `_meta` 的客户端统一使用默认会话（兼容旧客户端）。HTTP 的 `Mcp-Session-Id` 只用于协议与 SSE。
+会话首次收到请求时，可用 `_meta` 中的会话工作区（默认键 `dsh/workspace`，值为绝对目录）初始化
+该会话的工作区；路径非法/不存在/位于 `.dlqq` 下时静默回退到默认工作区。
 
 权限与超时：`permission.resource.level`（资源权限，默认 approval）与 `permission.operation.level`
 （操作权限，默认 approval）两套配置；旧 `workspace.write.mode` 已废弃。权限只能通过
