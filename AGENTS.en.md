@@ -146,6 +146,7 @@ Full examples are in the "8) Connect over HTTP (Streamable HTTP)" section of [RE
 | `script\build_and_copy.bat` | Build and sync to `.runtime\` | `.runtime\dlqq_mcp_server.jar`, `.runtime\libs\` |
 | `.runtime\make_python_env.bat` | One-click rebuild of the project Python env with bleak / ttkbootstrap / pillow | `.runtime\python\` (about 81 MB) |
 | `.runtime\start-http.bat` | Double-click HTTP launcher (uses `java\`, `libs\` and the sibling JAR; asks for the workspace first) | long-running HTTP service |
+| `.runtime\install_dlqq_mcp_dsh_client.bat` | Auto-install the DSH client plugin `dlqq-mcp-client`: download from Gitee first, fall back to GitHub; install dependencies and register it into the DSH profile (`link:` dependency + bundle + enabled patch entry) | `%USERPROFILE%\.dsh\plugins\dlqq-mcp-client`, updated DSH profile config |
 
 ### HTTP deployment layout
 
@@ -153,6 +154,7 @@ Full examples are in the "8) Connect over HTTP (Streamable HTTP)" section of [RE
 .runtime\                          # the whole directory is the deployment package
 ├── start-http.bat
 ├── dlqq_mcp_server.jar            # thin jar, project code only
+├── install_dlqq_mcp_dsh_client.bat / .ps1  # install the DSH client plugin automatically
 ├── make_python_env.bat / .py      # rebuild the Python runtime
 ├── java\                          # Microsoft OpenJDK 25 (GPLv2+CE)
 ├── python\                        # CPython 3.14.9 with all dependencies
@@ -163,6 +165,7 @@ Full examples are in the "8) Connect over HTTP (Streamable HTTP)" section of [RE
 - Default port is **49129**; if it is in use the console asks for another port, **Enter** retries the default port.
 - If `java\`, `libs\` or `python\` is missing the launcher fails with an explicit "incomplete package" error and never falls back to the system environment.
 - `java\` missing does not fall back to a `java` on `PATH`; `python\` missing disables the BLE tools.
+- `.runtime\install_dlqq_mcp_dsh_client.bat`: **close DSH first**, then run it; it downloads `dlqq-mcp-server-dsh-client` from Gitee (falling back to GitHub), installs it to `%USERPROFILE%\.dsh\plugins\dlqq-mcp-client` and registers it into the DSH profile (requires Node.js 20+ with `npm` on PATH).
 
 Usage:
 
@@ -228,11 +231,14 @@ The MCP 2026-07-28+ `server/discover` probe is supported (returns compatible 202
 client falls back to `initialize`); **stop the server before rebuilding/replacing the JAR**: if the running JAR is
 replaced, the health check shows a dialog and exits the process instead of letting client requests time out.
 
-Server console: on startup (with a graphical environment) a plain `JFrame` opens showing active
-sessions (key/workspace/source/permissions/last activity) and lets the user set the workspace and
-resource/operation permissions of the selected session. Closing the window hides it to the system
-tray (double-click the tray icon to restore); only "Exit server" in the tray or File menu terminates
-the MCP server process.
+Server console: on startup (with a graphical environment) it **starts hidden in the system tray** with no
+window; **single-click** the tray icon or use the tray menu "Show console" to open it. The menu bar shows the Chinese
+app name "鸫楼桥鹊MCP服务器控制台" (dropdown: hide/exit) with a Refresh button on its right (small right margin); the
+native title bar text is cleared. The table lists active sessions (key/workspace/source/resource permission/operation
+permission/last activity) and **workspace plus the two permission columns are edited directly by double-clicking a
+table cell** (the workspace cell has a directory picker button; permissions are dropdown choices) with immediate effect.
+The bottom area shows deploy dir, runtime dir, log file and session count (long paths scroll horizontally). Closing the
+window hides it again; only "Exit server" terminates the MCP server process.
 
 ## 6. Tool overview
 

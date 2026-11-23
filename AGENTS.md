@@ -147,6 +147,7 @@ java -jar dlqq_mcp_server.jar --transport http --port 49129 --path /mcp
 | `script\build_and_copy.bat` | 构建并同步到 `.runtime\` | `.runtime\dlqq_mcp_server.jar`、`.runtime\libs\` |
 | `.runtime\make_python_env.bat` | 一键重建项目 Python 环境并安装 bleak / ttkbootstrap / pillow | `.runtime\python\`（约 81 MB） |
 | `.runtime\start-http.bat` | 双击启动 HTTP 服务（用 `java\`、`libs\` 与同目录 jar，启动前询问工作区） | 常驻 HTTP 服务 |
+| `.runtime\install_dlqq_mcp_dsh_client.bat` | 自动安装 DSH 客户端插件 `dlqq-mcp-client`：优先从 Gitee 下载，失败回退 GitHub；安装依赖、注册到 DSH profile（`link:` 依赖 + bundle + 启用补丁） | `%USERPROFILE%\.dsh\plugins\dlqq-mcp-client`，DSH profile 配置更新 |
 
 ### HTTP 部署结构
 
@@ -154,6 +155,7 @@ java -jar dlqq_mcp_server.jar --transport http --port 49129 --path /mcp
 .runtime\                          # 整个目录就是部署包
 ├── start-http.bat
 ├── dlqq_mcp_server.jar            # thin jar，仅项目代码
+├── install_dlqq_mcp_dsh_client.bat / .ps1  # 自动安装 DSH 客户端插件
 ├── make_python_env.bat / .py      # 重建 Python 环境用
 ├── java\                          # Microsoft OpenJDK 25（GPLv2+CE）
 ├── python\                        # CPython 3.14.9 + 全部依赖
@@ -164,6 +166,7 @@ java -jar dlqq_mcp_server.jar --transport http --port 49129 --path /mcp
 - 默认端口 **49129**；被占用时控制台提示输入新端口，**直接回车 = 重试默认端口**。
 - 缺少 `java\`、`libs\`、`python\` 任一目录时，脚本直接报错"安装不完整"，不回退到系统环境。
 - `java\` 缺失不会回退 PATH 上的 java；`python\` 缺失则 BLE 工具不可用。
+- `.runtime\install_dlqq_mcp_dsh_client.bat`：**先关闭 DSH** 再运行；优先从 Gitee 下载 `dlqq-mcp-server-dsh-client`，失败回退 GitHub，安装到 `%USERPROFILE%\.dsh\plugins\dlqq-mcp-client` 并注册到 DSH profile（需 Node.js 20+，`npm` 在 PATH）。
 
 用法：
 
@@ -219,9 +222,12 @@ src/main/resources/
 支持 MCP 2026-07-28+ 客户端的 `server/discover` 探测（返回兼容的 2025 系协议版本，客户端回落 initialize）；
 **构建/替换 JAR 前必须先停止服务**：运行中 JAR 被替换会触发健康检查弹窗并主动退出进程，避免客户端请求超时。
 
-服务端控制台：启动时（有图形环境）打开普通 `JFrame`，展示活跃会话（会话键/工作区/来源/权限/最后活跃），
-可对选中会话设置工作区与资源/操作权限；点击关闭按钮隐藏到系统托盘（双击托盘图标恢复），
-只有托盘/文件菜单中的"退出服务器"才会终止 MCP 服务器进程。
+服务端控制台：启动时（有图形环境）**默认隐藏到系统托盘**、不弹出窗口；**单击**托盘图标或托盘菜单
+"显示控制台"打开窗口。菜单栏显示中文名「鸫楼桥鹊MCP服务器控制台」（下拉含隐藏/退出），右侧为刷新按钮（留右边距）；
+系统标题栏标题文字置空；表格展示活跃会话（会话键/工作区/来源/资源权限/操作权限/最后活跃），
+**工作区与资源/操作权限可直接双击表格单元格编辑**（工作区单元格带目录选择按钮，权限为下拉选择），提交后立即生效；
+底部显示部署目录/运行时目录/日志文件/活跃会话数，长路径可用横向滚动条查看；
+点击关闭按钮重新隐藏到托盘，只有"退出服务器"才会终止 MCP 服务器进程。
 
 ## 六、工具速查
 

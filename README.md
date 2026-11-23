@@ -863,6 +863,7 @@ curl -X POST http://localhost:49129/mcp -H "Content-Type: application/json" \
 .runtime\
 ├── start-http.bat
 ├── dlqq_mcp_server.jar            # thin jar
+├── install_dlqq_mcp_dsh_client.bat / .ps1  # 自动安装 DSH 客户端插件
 ├── make_python_env.bat / .py      # 重建 Python 环境
 ├── java\                          # Microsoft OpenJDK 25
 │   └── bin\java.exe
@@ -873,7 +874,22 @@ curl -X POST http://localhost:49129/mcp -H "Content-Type: application/json" \
 
 启动时脚本先要求输入工作区目录（必须已存在；直接回车 = 使用当前目录），校验通过后用 `java\bin\java.exe -jar dlqq_mcp_server.jar` 启动（JAR 清单里的 `Class-Path` 会自动加载 `libs\`），默认端口 **49129**，端点 `http://localhost:49129/mcp`。
 
-输入的工作区会作为 `--workspace` 参数传给服务；回车跳过时不传 `--workspace`，服务工作区默认为进程当前目录。工作区确定后，日志、缓存、配置都在 `<工作区>\.dlqq` 下。
+输入的工作区会作为 `--workspace` 参数传给服务；回车跳过时不传 `--workspace`，服务工作区默认为进程当前目录。工作区确定后，运行期数据（`cache`/`log`/`settings` 等）统一放在 `<jar 同级>\.dlqq` 下（全局唯一，不写工作区）。
+
+#### 自动安装 DSH 客户端插件（.runtime\install_dlqq_mcp_dsh_client.bat）
+
+- 作用：从 **Gitee（优先）** 下载 `dlqq-mcp-server-dsh-client` 源码包，Gitee 失败时自动回退 **GitHub**；
+- 安装位置：`%USERPROFILE%\.dsh\plugins\dlqq-mcp-client`，并自动执行 `npm install` 安装插件依赖；
+- 注册：把插件写入 DSH profile 的 `package.json`（`link:` 依赖 + `dsh.profile.bundles`），并在 `cordis.patch.yml` 中**尚无** `dlqq-mcp-client` 条目时追加启用配置（`command`/`args` 自动指向本部署目录的 `java\bin\java.exe` 与 `dlqq_mcp_server.jar`）；
+- 用法（**先关闭 DeepSeek Harness**）：
+
+  ```cmd
+  install_dlqq_mcp_dsh_client.bat
+  install_dlqq_mcp_dsh_client.bat "D:\path\to\other-profile"
+  ```
+
+  默认 profile 为 `%USERPROFILE%\.dsh\profiles\desktop`；需要 Node.js 20+（`npm` 在 PATH 上）。
+- 安装完成后重启 DSH 生效。
 
 **端口占用处理**（Java 内实现，启动后在控制台交互）：
 
@@ -2889,14 +2905,17 @@ settings.json
 
 ## 服务端控制台窗口
 
-服务启动后（有图形环境时）会打开一个普通 `JFrame` 控制台：
+服务启动后（有图形环境时）控制台**默认隐藏到系统托盘**，不弹出窗口；**单击**托盘图标或托盘菜单"显示控制台"可打开：
 
-- 展示当前活跃会话：会话键、工作区、来源、资源权限、操作权限、最后活跃时间（每 2 秒自动刷新）；
-- 选中会话后可设置其工作区（必须是已存在的绝对目录，且不能位于 `.dlqq` 下）；
-- 选中会话后可设置资源权限与操作权限（直接写入该工作区对应的 settings）；
-- 顶部显示部署目录、运行时目录与本次日志文件路径；
-- 点击标题栏关闭按钮**不会退出进程，而是隐藏到系统托盘**；托盘图标双击可重新打开窗口；
-- 托盘右键菜单（以及窗口"文件"菜单）提供"显示控制台 / 退出服务器"；
+- 窗口菜单栏显示中文名「鸫楼桥鹊MCP服务器控制台」（下拉含"隐藏到托盘 / 退出服务器"），右侧为「刷新」按钮（靠右留出间距）；
+- 系统标题栏中间的标题文字已置空（不显示窗口标题）；菜单栏下方为会话表格；
+- 表格展示当前活跃会话：会话键、工作区、来源、资源权限、操作权限、最后活跃时间（每 2 秒自动刷新）；
+- **工作区、资源权限、操作权限直接在表格中双击单元格编辑**（工作区需为已存在的绝对目录，且不能位于 `.dlqq` 下；
+  工作区单元格右侧带**目录选择按钮**，可直接弹出目录选择框；权限列为下拉选择），
+  提交后立即生效并写入该工作区对应的 settings，不需要底部单独设置按钮；
+- 窗口底部显示部署目录、运行时目录、本次日志文件路径与活跃会话数；路径过长时可使用横向滚动条查看完整路径；
+- 点击标题栏关闭按钮**不会退出进程，而是隐藏到系统托盘**；单击托盘图标可重新打开窗口；
+- 托盘右键菜单（以及窗口菜单）提供"显示控制台 / 退出服务器"；
 - **只有选择"退出服务器"才会终止 MCP 服务器进程**（客户端连接随之中断）；
 - 无图形环境（headless）时不会创建该窗口。
 

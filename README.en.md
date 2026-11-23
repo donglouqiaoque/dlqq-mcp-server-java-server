@@ -111,6 +111,7 @@ java -Dfile.encoding=UTF-8 -jar dlqq_mcp_server.jar --transport http --port 4912
 .runtime\                        # the whole directory is the deployment package
 ├── start-http.bat               # ASCII-only launcher (port 49129)
 ├── dlqq_mcp_server.jar          # thin JAR
+├── install_dlqq_mcp_dsh_client.bat / .ps1  # install the DSH client plugin automatically
 ├── make_python_env.bat / .py    # rebuild the Python runtime
 ├── java\                        # Microsoft OpenJDK 25
 │   └── bin\java.exe
@@ -121,7 +122,22 @@ java -Dfile.encoding=UTF-8 -jar dlqq_mcp_server.jar --transport http --port 4912
 
 ### Launcher behavior (`start-http.bat`)
 
-Double-click `start-http.bat`: it **first asks for the workspace directory** (must be an existing absolute directory; press **Enter** to use the current directory), validates it, and only then starts the HTTP server with `--workspace`, using the bundled `java\bin\java.exe`. If Enter is pressed, no `--workspace` is passed and the server workspace defaults to the process CWD. After the workspace is fixed, logs, cache and settings live under `<workspace>\.dlqq`.
+Double-click `start-http.bat`: it **first asks for the workspace directory** (must be an existing absolute directory; press **Enter** to use the current directory), validates it, and only then starts the HTTP server with `--workspace`, using the bundled `java\bin\java.exe`. If Enter is pressed, no `--workspace` is passed and the server workspace defaults to the process CWD. After the workspace is fixed, runtime data (`cache`/`log`/`settings`, ...) lives under `<jar dir>\.dlqq` (one global directory, never inside workspaces).
+
+### Auto-install the DSH client plugin (`install_dlqq_mcp_dsh_client.bat`)
+
+- Downloads the `dlqq-mcp-server-dsh-client` source package from **Gitee (preferred)**, and automatically falls back to **GitHub** when Gitee fails;
+- Installs it to `%USERPROFILE%\.dsh\plugins\dlqq-mcp-client` and runs `npm install` for the plugin dependencies;
+- Registers the plugin in the DSH profile `package.json` (`link:` dependency + `dsh.profile.bundles`) and, when `cordis.patch.yml` has **no** `dlqq-mcp-client` entry yet, appends an enabled entry whose `command`/`args` point at this deployment's `java\bin\java.exe` and `dlqq_mcp_server.jar`;
+- Usage (**close DeepSeek Harness first**):
+
+  ```cmd
+  install_dlqq_mcp_dsh_client.bat
+  install_dlqq_mcp_dsh_client.bat "D:\path\to\other-profile"
+  ```
+
+  The default profile is `%USERPROFILE%\.dsh\profiles\desktop`; Node.js 20+ (`npm` on PATH) is required.
+- Restart DSH after the installation.
 
 Port handling is implemented inside Java: an occupied port asks for a new one at the console; **Enter** retries the default port; a non-interactive console exits with code 1.
 
@@ -381,14 +397,21 @@ All runtime data lives in **one directory next to the jar**; no `.dlqq` is creat
 
 ## Server console window
 
-When a graphical environment is available, startup opens a plain `JFrame` console:
+When a graphical environment is available, the console **starts hidden in the system tray** (no window pops up);
+**single-click** the tray icon or use the tray menu "Show console" to open it:
 
-- Lists active sessions: session key, workspace, source, resource permission, operation permission, last activity (refreshed every 2 s);
-- For a selected session it can set the workspace (must be an existing absolute directory and must not be under `.dlqq`);
-- For a selected session it can set the resource and operation permissions (written directly into that workspace's settings);
-- The top area shows the deploy directory, runtime directory and current log file;
-- **Closing the window does not terminate the process: it hides the console to the system tray**; double-click the tray icon to restore it;
-- The tray right-click menu (and the window's File menu) offers "Show console / Exit server";
+- The menu bar shows the Chinese app name "鸫楼桥鹊MCP服务器控制台" (its dropdown holds "Hide to tray / Exit server"); the
+  "Refresh" button is on its right with a small right margin;
+- The native title bar text is cleared (no window title is shown); the session table sits right below the menu bar;
+- The table lists active sessions: session key, workspace, source, resource permission, operation permission, last activity (refreshed every 2 s);
+- **The workspace, resource permission and operation permission columns are edited directly in the table by double-clicking a cell**
+  (the workspace must be an existing absolute directory and must not be under `.dlqq`; the workspace cell has a **directory-picker
+  button** on its right that opens a folder chooser; permissions are chosen from a dropdown);
+  changes apply immediately and are written into that workspace's settings, so no separate bottom controls are needed;
+- The bottom area shows the deploy directory, runtime directory, current log file and active session count; long paths can be
+  scrolled horizontally to read the full path;
+- **Closing the window does not terminate the process: it hides the console to the system tray**; single-click the tray icon to restore it;
+- The tray right-click menu (and the window menu) offers "Show console / Exit server";
 - Only choosing "Exit server" terminates the MCP server process (clients lose the connection);
 - No window is created in a headless environment.
 

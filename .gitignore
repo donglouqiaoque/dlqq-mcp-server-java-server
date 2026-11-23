@@ -10,5 +10,7 @@ target
 .runtime/*
 !.runtime/start-http.bat
 !.runtime/build.bat
+!.runtime/install_dlqq_mcp_dsh_client.bat
+!.runtime/install_dlqq_mcp_dsh_client.ps1
 
 !.gitkeep
