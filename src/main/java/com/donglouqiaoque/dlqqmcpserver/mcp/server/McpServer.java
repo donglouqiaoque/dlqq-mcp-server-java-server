@@ -333,6 +333,10 @@ public class McpServer {
                 boolean isNotification = request.isNotification();
 
                 switch (method) {
+                    case "server/discover":
+                        logger.info("[McpServer.handleMessage] Handling server/discover probe");
+                        handleDiscover(request);
+                        break;
                     case "initialize":
                         logger.info("[McpServer.handleMessage] Handling initialize request");
                         handleInitialize(request);
@@ -373,7 +377,7 @@ public class McpServer {
                             logger.warn("[McpServer.handleMessage] Ignoring unknown notification: {}", method);
                         }
                 }
-            } catch (Exception e) {
+            } catch (Throwable e) {
                 logger.error("[McpServer.handleMessage] Error handling request: method={}, error={}", method, e.getMessage(), e);
                 try {
                     // 对于通知，不发送错误响应
@@ -434,6 +438,26 @@ public class McpServer {
         // 初始化确认是通知，不需要响应
         // 但需要确认服务器已正确初始化
         logger.info("MCP server initialized, ready for requests");
+    }
+
+    /**
+     * 处理 {@code server/discover} 探测（MCP 2026-07-28+ 客户端在连接时先发送该请求）。
+     *
+     * <p>返回服务器支持的协议版本与能力；只声明当前实现实际兼容的 2025 系协议版本，
+     * 客户端据此回落到传统 initialize 握手，避免探测失败后杀进程重连。</p>
+     */
+    private void handleDiscover(JsonRpcMessage.Request request) throws IOException {
+        logger.info("[McpServer.handleDiscover] ========== Handling server/discover probe ==========");
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("supportedVersions", List.of("2025-11-25", "2025-06-18", "2025-03-26"));
+        Map<String, Object> capabilities = new LinkedHashMap<>();
+        capabilities.put("tools", Map.of("listChanged", false));
+        capabilities.put("prompts", Map.of());
+        capabilities.put("resources", Map.of());
+        result.put("capabilities", capabilities);
+        result.put("instructions", "dlqq-mcp-server: MCP tools with dlqq_ prefix");
+        sendResponse(request.getId(), result);
+        logger.info("[McpServer.handleDiscover] Response sent, supportedVersions={}", result.get("supportedVersions"));
     }
 
     /**

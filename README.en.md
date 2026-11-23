@@ -371,7 +371,26 @@ All runtime data lives in **one directory next to the jar**; no `.dlqq` is creat
   (dialog + stderr + exit code); there is no user-directory fallback;
 - **Logs**: one new file per process start, logger and stderr merged, collisions suffixed `-2`, `-3`;
 - **Cleanup tools**: `dlqq_clear_mcp_cache` accepts `workspace`/`all`; `dlqq_clear_mcp_data` only clears
-  cache/data/log and **never deletes settings** (permission config is protected).
+  cache/data/log and **never deletes settings** (permission config is protected);
+- **Protocol discovery**: the MCP 2026-07-28+ `server/discover` probe is supported (advertising compatible
+  2025-era protocol versions), so modern clients fall back to the legacy `initialize` handshake instead of
+  killing and respawning the process after a failed probe;
+- **JAR replacement detection**: if `dlqq_mcp_server.jar` is rebuilt/overwritten while the server is running,
+  the health check logs an error, shows a dialog and exits the process (continuing would break lazy class
+  loading and make request handling die, leaving client calls hanging); **stop the server before rebuilding**.
+
+## Server console window
+
+When a graphical environment is available, startup opens a plain `JFrame` console:
+
+- Lists active sessions: session key, workspace, source, resource permission, operation permission, last activity (refreshed every 2 s);
+- For a selected session it can set the workspace (must be an existing absolute directory and must not be under `.dlqq`);
+- For a selected session it can set the resource and operation permissions (written directly into that workspace's settings);
+- The top area shows the deploy directory, runtime directory and current log file;
+- **Closing the window does not terminate the process: it hides the console to the system tray**; double-click the tray icon to restore it;
+- The tray right-click menu (and the window's File menu) offers "Show console / Exit server";
+- Only choosing "Exit server" terminates the MCP server process (clients lose the connection);
+- No window is created in a headless environment.
 
 ## Multi-session in one process (session isolation)
 

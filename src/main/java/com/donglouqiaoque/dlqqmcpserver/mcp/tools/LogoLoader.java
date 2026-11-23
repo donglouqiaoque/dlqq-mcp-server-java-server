@@ -41,7 +41,7 @@ public final class LogoLoader {
      *
      * @return Logo 图片；资源不存在或加载失败时返回 null（调用方应静默降级，不影响窗口功能）
      */
-    static Image load() {
+    public static Image load() {
         Image cached = cachedLogo;
         if (cached != null) {
             return cached;
@@ -64,8 +64,11 @@ public final class LogoLoader {
 
     /**
      * 为窗口设置 LOGO 图标（失败时静默降级）。
+     *
+     * @param window   目标窗口
+     * @param toolName 工具/窗口名（用于日志）
      */
-    static void applyTo(Window window, String toolName) {
+    public static void applyTo(Window window, String toolName) {
         try {
             Image logo = load();
             if (logo != null) {

@@ -295,6 +295,66 @@ public final class Workspace {
     }
 
     /**
+     * 读取指定工作区配置的操作权限（控制台展示用）。
+     *
+     * @param root 工作区根目录
+     * @return 操作权限；未配置时为默认值 chat
+     */
+    public static String getOperationPermissionOf(Path root) {
+        if (root == null) {
+            return DEFAULT_OPERATION_PERMISSION;
+        }
+        Path settingsFile = settingsFileOf(root);
+        String value = readSettingsValue(settingsFile, OPERATION_PERMISSION_KEY);
+        String normalized = normalizeOperationPermission(value);
+        return normalized == null ? DEFAULT_OPERATION_PERMISSION : normalized;
+    }
+
+    /**
+     * 为指定工作区写入资源权限（不依赖当前线程会话，供控制台使用）。
+     *
+     * @param root 工作区根目录
+     * @param mode chat / readonly / workspace / approval / highrisk / full
+     * @return 实际写入的规范化权限
+     * @throws IllegalArgumentException 模式非法或写入失败
+     */
+    public static String setPermissionFor(Path root, String mode) {
+        String normalized = normalizePermission(mode);
+        if (normalized == null) {
+            throw new IllegalArgumentException("资源权限必须是 chat、readonly、workspace、approval、highrisk 或 full: " + mode);
+        }
+        Path settingsFile = settingsFileOf(root);
+        try {
+            writeSettingsValue(settingsFile, PERMISSION_KEY, normalized);
+            removeLegacyPermissionKey(settingsFile);
+        } catch (IOException e) {
+            throw new IllegalArgumentException("写入资源权限配置失败: " + e.getMessage());
+        }
+        return normalized;
+    }
+
+    /**
+     * 为指定工作区写入操作权限（不依赖当前线程会话，供控制台使用）。
+     *
+     * @param root 工作区根目录
+     * @param mode chat / readonly / approval / highrisk / full
+     * @return 实际写入的规范化权限
+     * @throws IllegalArgumentException 模式非法或写入失败
+     */
+    public static String setOperationPermissionFor(Path root, String mode) {
+        String normalized = normalizeOperationPermission(mode);
+        if (normalized == null) {
+            throw new IllegalArgumentException("操作权限必须是 chat、readonly、approval、highrisk 或 full: " + mode);
+        }
+        try {
+            writeSettingsValue(settingsFileOf(root), OPERATION_PERMISSION_KEY, normalized);
+        } catch (IOException e) {
+            throw new IllegalArgumentException("写入操作权限配置失败: " + e.getMessage());
+        }
+        return normalized;
+    }
+
+    /**
      * 设置当前会话的操作权限并持久化。
      *
      * @param mode chat / readonly / approval / highrisk / full
@@ -312,7 +372,7 @@ public final class Workspace {
         }
     }
 
-    private static String normalizeOperationPermission(String mode) {
+    static String normalizeOperationPermission(String mode) {
         if (mode == null) {
             return null;
         }

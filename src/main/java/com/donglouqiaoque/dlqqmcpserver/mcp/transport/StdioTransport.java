@@ -441,7 +441,12 @@ public class StdioTransport implements McpTransport {
                     emptyPollCount = 0; // 重置空轮询计数
                     logger.info("[StdioTransport.processLoop] Took message from queue, remaining: {}, processed: {}",
                             messageQueue.size(), processedCount + 1);
-                    processMessage(message);
+                    try {
+                        processMessage(message);
+                    } catch (Throwable fatal) {
+                        // 即使出现 Error（如运行中被替换 JAR 导致的 NoClassDefFoundError），也不能让处理线程退出
+                        logger.error("[StdioTransport.processLoop] Fatal error while processing message: {}", fatal.toString(), fatal);
+                    }
                     processedCount++;
                 } else {
                     emptyPollCount++;
@@ -573,14 +578,14 @@ public class StdioTransport implements McpTransport {
                     messageHandler.accept(request);
                     long elapsed = System.currentTimeMillis() - startTime;
                     logger.info("[StdioTransport.processMessage] messageHandler completed, took {}ms", elapsed);
-                } catch (Exception handlerEx) {
+                } catch (Throwable handlerEx) {
                     logger.error("[StdioTransport.processMessage] Exception in messageHandler: {}", handlerEx.getMessage(), handlerEx);
                     throw handlerEx;
                 }
             } else {
                 logger.warn("[StdioTransport.processMessage] messageHandler not set, cannot process request");
             }
-        } catch (Exception e) {
+        } catch (Throwable e) {
             logger.error("[StdioTransport.processMessage] Error processing message: {}", e.getMessage(), e);
             try {
                 sendErrorResponse(null, JsonRpcMessage.ERROR_PARSE_ERROR,

@@ -105,8 +105,11 @@ public final class ToolPolicy {
         }
         boolean inside = isInsideWorkspace(arguments);
 
-        var resource = decideResource(risk[0], inside);
-        var operation = decideOperation(risk[1]);
+        // 只在工具确实使用对应能力时才判断该维度权限：
+        // 无资源读写（资源风险 SAFE）不判资源权限；无外设操作（操作风险 SAFE）不判操作权限；
+        // 两者都使用的工具（如截图）才两个维度都判断。
+        Result resource = risk[0] == Risk.SAFE ? Result.allow() : decideResource(risk[0], inside);
+        Result operation = risk[1] == Risk.SAFE ? Result.allow() : decideOperation(risk[1]);
         if (resource.decision == Decision.DENY) {
             return resource;
         }

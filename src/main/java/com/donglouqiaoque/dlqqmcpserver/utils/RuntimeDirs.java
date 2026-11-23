@@ -129,6 +129,12 @@ public final class RuntimeDirs {
         return appDir;
     }
 
+    /** 服务器 JAR 文件（{@code <部署目录>/dlqq_mcp_server.jar}），用于运行期替换检测。 */
+    public static Path getServerJar() {
+        ensureInitialized();
+        return appDir.resolve("dlqq_mcp_server.jar");
+    }
+
     /** 全局运行时目录 {@code <部署目录>/.dlqq}。 */
     public static Path getRoot() {
         ensureInitialized();

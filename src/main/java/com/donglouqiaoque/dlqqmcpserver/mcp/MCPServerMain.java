@@ -9,6 +9,8 @@ import com.donglouqiaoque.dlqqmcpserver.mcp.transport.StdioTransport;
 import com.formdev.flatlaf.FlatDarkLaf;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import javax.swing.JOptionPane;
+import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
 import java.awt.GraphicsEnvironment;
 import java.io.IOException;
@@ -20,6 +22,7 @@ import com.donglouqiaoque.dlqqmcpserver.utils.WorkspaceRegistry;
 import java.io.FileOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.Charset;
+import java.nio.file.Files;
 import java.nio.file.Path;
 
 /**
@@ -61,6 +64,10 @@ public class MCPServerMain {
     private static volatile boolean isRunning = true;
     private static McpTransport transport;
     private static McpServer server;
+
+    /** 启动时记录的服务器 JAR 修改时间与大小（运行中被替换会导致类懒加载失败，必须主动退出）。 */
+    private static long jarInitialModified = -1L;
+    private static long jarInitialSize = -1L;
 
     // 传输方式配置（默认 stdio）
     private static boolean httpMode = false;
@@ -143,10 +150,16 @@ public class MCPServerMain {
         logger.info("Workspace: {} (source: {})", Workspace.getRoot(), Workspace.getSource());
         logger.info("Default charset: {}", Charset.defaultCharset().name());
         logger.info("Log file: {}", RuntimeDirs.getCurrentLogFile());
+
+        // 记录 JAR 基线：运行中若 JAR 被替换（构建/覆盖），健康检查会主动退出，避免客户端请求超时
+        recordJarBaseline();
         
         try {
             startServer();
-            
+
+            // 服务端控制台窗口：查看活跃会话、设置会话工作区与权限；关闭窗口即终止服务器进程
+            ServerConsoleWindow.start();
+
             // 启动健康检查线程
             startHealthCheckThread();
             
@@ -313,6 +326,58 @@ public class MCPServerMain {
     }
     
     /**
+     * 记录启动时服务器 JAR 的修改时间与大小，用于运行期替换检测。
+     */
+    private static void recordJarBaseline() {
+        try {
+            Path jar = RuntimeDirs.getServerJar();
+            jarInitialModified = Files.getLastModifiedTime(jar).toMillis();
+            jarInitialSize = Files.size(jar);
+            logger.info("Server JAR baseline: modified={}, size={}", jarInitialModified, jarInitialSize);
+        } catch (IOException e) {
+            logger.warn("Cannot record server JAR baseline: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * 服务器 JAR 是否已在运行期被替换（修改时间或大小变化）。
+     */
+    private static boolean serverJarReplaced() {
+        if (jarInitialModified < 0) {
+            return false;
+        }
+        try {
+            Path jar = RuntimeDirs.getServerJar();
+            return Files.getLastModifiedTime(jar).toMillis() != jarInitialModified
+                    || Files.size(jar) != jarInitialSize;
+        } catch (IOException e) {
+            logger.warn("[HealthCheck] Cannot check server JAR: {}", e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * 运行中 JAR 被替换：记录日志、弹窗提示并退出进程。
+     * 继续运行会因类懒加载失败导致请求线程死亡、客户端请求超时，因此必须退出等待重启。
+     */
+    private static void exitBecauseServerJarReplaced() {
+        logger.error("[HealthCheck] Server JAR was replaced while running; exiting so the client can restart the server");
+        isRunning = false;
+        String message = "检测到 MCP 服务器 JAR 已被替换（构建/覆盖），当前进程无法继续加载新代码，即将退出。"
+                + "\n请重新启动 MCP 服务/客户端。";
+        if (!GraphicsEnvironment.isHeadless()) {
+            SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(null, message,
+                    "dlqq-mcp-server", JOptionPane.WARNING_MESSAGE));
+        }
+        try {
+            Thread.sleep(3000);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        System.exit(0);
+    }
+
+    /**
      * 启动健康检查线程
      * 监控服务器状态，如果传输层断开则尝试恢复
      */
@@ -330,6 +395,11 @@ public class MCPServerMain {
                 try {
                     Thread.sleep(checkInterval);
                     checkCount++;
+
+                    // 运行中 JAR 被替换（构建/覆盖）会破坏类懒加载：主动退出，避免客户端请求永久超时
+                    if (serverJarReplaced()) {
+                        exitBecauseServerJarReplaced();
+                    }
 
                     // 每30秒输出一次内存状态
                     if (System.currentTimeMillis() - lastMemoryLog > 30000) {

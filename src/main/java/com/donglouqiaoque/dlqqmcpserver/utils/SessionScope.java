@@ -6,6 +6,8 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
@@ -406,6 +408,132 @@ public final class SessionScope {
         }
         if (SESSIONS.remove(sessionId) != null) {
             logger.info("[SessionScope] Session disposed: {}", sessionId);
+        }
+    }
+
+    /**
+     * 活跃会话快照（供服务端控制台展示）。
+     *
+     * @return 按最后活跃时间倒序排列的会话信息列表
+     */
+    public static synchronized List<SessionInfo> activeSessions() {
+        List<SessionInfo> result = new ArrayList<>(SESSIONS.size());
+        for (Map.Entry<String, Session> entry : SESSIONS.entrySet()) {
+            Session session = entry.getValue();
+            result.add(new SessionInfo(
+                    entry.getKey(),
+                    session.root,
+                    session.source,
+                    session.permission,
+                    Workspace.getOperationPermissionOf(session.root),
+                    session.lastAccess));
+        }
+        result.sort((left, right) -> Long.compare(right.lastAccessMillis(), left.lastAccessMillis()));
+        return result;
+    }
+
+    /**
+     * 控制台设置指定会话的工作区（不修改启动默认工作区）。
+     *
+     * @param sessionId 会话键
+     * @param workspace 目标工作区目录
+     * @return 设置成功返回 true；会话不存在或工作区非法返回 false
+     */
+    public static synchronized boolean setSessionWorkspace(String sessionId, Path workspace) {
+        Session session = SESSIONS.get(normalizeSessionId(sessionId));
+        if (session == null || workspace == null || !isUsableWorkspace(workspace)) {
+            return false;
+        }
+        session.root = workspace.toAbsolutePath().normalize();
+        session.source = "server console";
+        session.ensuredRoot = null;
+        session.permission = loadPermission(session.root);
+        logger.info("[SessionScope] Console set workspace for session {}: {}", sessionId, session.root);
+        return true;
+    }
+
+    /**
+     * 控制台设置指定会话的资源权限（写入该工作区 settings）。
+     *
+     * @param sessionId 会话键
+     * @param mode      资源权限
+     * @return 设置成功返回 true
+     */
+    public static synchronized boolean setSessionResourcePermission(String sessionId, String mode) {
+        Session session = SESSIONS.get(normalizeSessionId(sessionId));
+        if (session == null) {
+            return false;
+        }
+        String normalized = Workspace.setPermissionFor(session.root, mode);
+        session.permission = normalized;
+        logger.info("[SessionScope] Console set resource permission for session {}: {}", sessionId, normalized);
+        return true;
+    }
+
+    /**
+     * 控制台设置指定会话的操作权限（写入该工作区 settings）。
+     *
+     * @param sessionId 会话键
+     * @param mode      操作权限
+     * @return 设置成功返回 true
+     */
+    public static synchronized boolean setSessionOperationPermission(String sessionId, String mode) {
+        Session session = SESSIONS.get(normalizeSessionId(sessionId));
+        if (session == null) {
+            return false;
+        }
+        String normalized = Workspace.setOperationPermissionFor(session.root, mode);
+        logger.info("[SessionScope] Console set operation permission for session {}: {}", sessionId, normalized);
+        return true;
+    }
+
+    /** 会话信息快照（不可变）。 */
+    public static final class SessionInfo {
+        private final String id;
+        private final Path workspace;
+        private final String source;
+        private final String resourcePermission;
+        private final String operationPermission;
+        private final long lastAccessMillis;
+
+        private SessionInfo(String id, Path workspace, String source, String resourcePermission,
+                            String operationPermission, long lastAccessMillis) {
+            this.id = id;
+            this.workspace = workspace;
+            this.source = source;
+            this.resourcePermission = resourcePermission;
+            this.operationPermission = operationPermission;
+            this.lastAccessMillis = lastAccessMillis;
+        }
+
+        /** 会话键。 */
+        public String id() {
+            return id;
+        }
+
+        /** 会话工作区。 */
+        public Path workspace() {
+            return workspace;
+        }
+
+        /** 工作区来源。 */
+        public String source() {
+            return source;
+        }
+
+        /** 资源权限。 */
+        public String resourcePermission() {
+            return resourcePermission;
+        }
+
+        /** 操作权限。 */
+        public String operationPermission() {
+            return operationPermission;
+        }
+
+        /** 最后活跃时间（epoch 毫秒）。 */
+        public long lastAccessMillis() {
+            return lastAccessMillis;
         }
     }
 

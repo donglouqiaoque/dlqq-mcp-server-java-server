@@ -224,6 +224,16 @@ start) and `settings/<workspace hash>/settings.properties`; plus the fallback wo
 startup fails (dialog + stderr + exit code) and no `.dlqq` is written into workspaces. AI can never
 read or write `.dlqq` at any permission level except the content of the current session cache
 directory; a workspace must never be located under `.dlqq`.
+The MCP 2026-07-28+ `server/discover` probe is supported (returns compatible 2025-era protocol versions so the
+client falls back to `initialize`); **stop the server before rebuilding/replacing the JAR**: if the running JAR is
+replaced, the health check shows a dialog and exits the process instead of letting client requests time out.
+
+Server console: on startup (with a graphical environment) a plain `JFrame` opens showing active
+sessions (key/workspace/source/permissions/last activity) and lets the user set the workspace and
+resource/operation permissions of the selected session. Closing the window hides it to the system
+tray (double-click the tray icon to restore); only "Exit server" in the tray or File menu terminates
+the MCP server process.
+
 ## 6. Tool overview
 
 **159** tools in total. Implementations live in `mcp/tools/`; parameters are documented in [README.en.md](README.en.md).
