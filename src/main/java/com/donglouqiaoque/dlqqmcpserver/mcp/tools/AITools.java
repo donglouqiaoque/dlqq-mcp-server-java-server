@@ -2,6 +2,8 @@ package com.donglouqiaoque.dlqqmcpserver.mcp.tools;
 
 import com.donglouqiaoque.dlqqmcpserver.mcp.protocol.McpSchema.*;
 import com.donglouqiaoque.dlqqmcpserver.mcp.server.McpServer;
+import com.donglouqiaoque.dlqqmcpserver.utils.RuntimeDirs;
+import com.donglouqiaoque.dlqqmcpserver.utils.SessionScope;
 import com.donglouqiaoque.dlqqmcpserver.utils.Workspace;
 
 import java.io.IOException;
@@ -4250,7 +4252,7 @@ public class AITools {
         ToolInputSchema inputSchema = new ToolInputSchema(properties, Collections.singletonList("path"));
 
         server.addTool("dlqq_workspace_set",
-            "设置 MCP 服务器的工作区目录（必须是已存在的绝对目录）：之后所有工具的相对路径都基于该目录解析。工作区路径不持久化，仅本次运行有效；启动参数 --workspace 优先",
+            "设置 MCP 服务器的工作区目录（必须是已存在的绝对目录，且不能位于 .dlqq 下）：之后所有工具的相对路径都基于该目录解析。工作区路径不持久化，仅本次运行有效；设置失败时保持当前工作区不变",
             inputSchema,
             arguments -> {
                 Object raw = arguments == null ? null : arguments.get("path");
@@ -4259,9 +4261,13 @@ public class AITools {
                     return textResult("✗ 错误：请提供工作区目录（path）");
                 }
                 if (!Workspace.isValidDirectory(path)) {
-                    return textResult("✗ 设置失败：工作区必须是已存在的绝对目录: " + path);
+                    return textResult("✗ 设置失败：工作区必须是已存在的绝对目录: " + path + "\n当前工作区保持不变: " + Workspace.getRoot());
                 }
                 Path target = Workspace.resolve(path);
+                if (Workspace.touchesDlqq(target)) {
+                    return textResult("✗ 设置失败：工作区不能位于 .dlqq 目录下: " + target
+                            + "\n当前工作区保持不变: " + Workspace.getRoot());
+                }
                 // 目标工作区与当前一致：直接返回，不弹任何窗口
                 if (target.toAbsolutePath().normalize()
                         .equals(Workspace.getRoot().toAbsolutePath().normalize())) {
@@ -4305,7 +4311,7 @@ public class AITools {
         ToolInputSchema inputSchema = new ToolInputSchema(properties, Collections.emptyList());
 
         server.addTool("dlqq_workspace_get",
-            "查看当前工作区目录、来源（启动参数 --workspace / 运行期设置 / 进程工作目录 / 会话 cwd）、资源权限（chat/readonly/workspace/approval/highrisk/full）、操作权限（readonly/approval/highrisk/full）、权限配置文件与进程 CWD；并显示当前会话标识、会话键名、Agent 键名、工作区键名、活跃会话数（单进程多会话 × 多 Agent）",
+            "查看当前工作区目录、来源（--workspace / 运行期设置 / 进程工作目录 / 会话 cwd / default_workspace）、资源权限（chat/readonly/workspace/approval/highrisk/full）、操作权限（chat/readonly/approval/highrisk/full）、权限配置文件、全局运行时目录与缓存目录；并显示当前会话标识、会话键名、Agent 键名、工作区键名、活跃会话数",
             inputSchema,
             arguments -> textResult("工作区信息\n===================\n\n"
                     + "当前会话: " + Workspace.getSessionId() + "\n"
@@ -4319,6 +4325,8 @@ public class AITools {
                     + "资源权限: " + Workspace.getPermissionLabel() + "\n"
                     + "操作权限: " + Workspace.getOperationPermissionLabel() + "\n"
                     + "权限配置: " + Workspace.getPermissionFile() + "\n"
+                    + "运行时目录: " + RuntimeDirs.getRoot() + "\n"
+                    + "缓存目录: " + SessionScope.currentCacheDir() + "\n"
                     + "进程工作目录: " + System.getProperty("user.dir"))
         );
     }
@@ -4330,13 +4338,16 @@ public class AITools {
         Map<String, Object> properties = new HashMap<>();
         ToolInputSchema inputSchema = new ToolInputSchema(properties, Collections.emptyList());
         server.addTool("dlqq_get_cwd_path",
-            "获取 MCP 服务进程的当前工作目录（CWD）与当前工作区路径",
+            "获取 MCP 服务进程的当前工作目录（CWD）、当前工作区、全局运行时目录与缓存目录",
             inputSchema,
             arguments -> textResult("路径信息\n===================\n\n"
                     + "进程工作目录: " + System.getProperty("user.dir") + "\n"
                     + "当前工作区: " + Workspace.getRoot() + "\n"
                     + "工作区来源: " + Workspace.getSource() + "\n"
-                    + "当前会话: " + Workspace.getSessionId())
+                    + "当前会话: " + Workspace.getSessionId() + "\n"
+                    + "运行时目录: " + RuntimeDirs.getRoot() + "\n"
+                    + "缓存目录: " + SessionScope.currentCacheDir() + "\n"
+                    + "兜底工作区: " + RuntimeDirs.getDefaultWorkspace())
         );
     }
     /**
@@ -4392,14 +4403,14 @@ public class AITools {
         properties.put("resource_mode", resourceProp);
         Map<String, Object> operationProp = new HashMap<>();
         operationProp.put("type", "string");
-        operationProp.put("description", "操作权限：readonly（只读）、approval（需要批准）、highrisk（高危需批准）、full（完全权限）");
+        operationProp.put("description", "操作权限：chat（对话）、readonly（只读）、approval（需要批准）、highrisk（高危需批准）、full（完全权限）");
         properties.put("operation_mode", operationProp);
         ToolInputSchema inputSchema = new ToolInputSchema(properties, Collections.emptyList());
 
         server.addTool("dlqq_workspace_permission_set",
             "设置当前工作区的资源权限（文件/目录/命令等）与操作权限（鼠标/键盘/屏幕/串口/BLE/WiFi/USB 等外设）。"
                     + "该工具在任意权限等级下都可调用；降权/同级直接执行，提权必须用户批准。"
-                    + "配置写入 " + Workspace.SETTINGS_RELATIVE_PATH + " 的 "
+                    + "配置写入 <部署目录>/.dlqq/settings/<工作区hash>/settings.properties 的 "
                     + Workspace.PERMISSION_KEY + " 与 " + Workspace.OPERATION_PERMISSION_KEY,
             inputSchema,
             arguments -> {
@@ -4492,6 +4503,8 @@ public class AITools {
             return -1;
         }
         switch (mode.trim().toLowerCase()) {
+            case "chat":
+                return 0;
             case "readonly":
                 return 1;
             case "approval":
@@ -4557,7 +4570,7 @@ public class AITools {
         ToolInputSchema inputSchema = new ToolInputSchema(properties, Collections.emptyList());
 
         server.addTool("dlqq_clear_mcp_data",
-            "清除MCP数据目录（.dlqq），删除整个目录及其所有内容（包括日志、Python脚本等）。即使部分文件被占用也会返回成功结果，并告知哪些文件被占用。",
+            "清除运行时数据（.dlqq 下的 cache、data、log），保留 settings 与 workspace_config.json（权限配置受保护）。即使部分文件被占用也会返回成功结果，并告知哪些文件被占用。",
             inputSchema,
             arguments -> {
                 String result = McpTools.clearDlqqData();
@@ -4571,13 +4584,24 @@ public class AITools {
      */
     private void registerClearMcpCacheTool(McpServer server) {
         Map<String, Object> properties = new HashMap<>();
+        Map<String, Object> workspaceProp = new HashMap<>();
+        workspaceProp.put("type", "string");
+        workspaceProp.put("description", "要清理的工作区绝对路径（可选）；不传且 all=false 时清理当前会话工作区的缓存");
+        properties.put("workspace", workspaceProp);
+        Map<String, Object> allProp = new HashMap<>();
+        allProp.put("type", "boolean");
+        allProp.put("description", "是否清理全部工作区的缓存（可选，默认 false）");
+        properties.put("all", allProp);
         ToolInputSchema inputSchema = new ToolInputSchema(properties, Collections.emptyList());
 
         server.addTool("dlqq_clear_mcp_cache",
-            "清除MCP缓存目录（.dlqq/cache），删除缓存的所有文件和子目录。即使部分文件被占用也会返回成功结果，并告知哪些文件被占用。",
+            "清除缓存目录（.dlqq/cache/<工作区hash>/<会话hash>）。可传 workspace 清理指定工作区，或 all=true 清理全部工作区；都不传则清理当前会话缓存。",
             inputSchema,
             arguments -> {
-                String result = McpTools.clearCache();
+                String workspace = arguments != null && arguments.get("workspace") != null
+                        ? String.valueOf(arguments.get("workspace")) : null;
+                boolean all = arguments != null && Boolean.TRUE.equals(arguments.get("all"));
+                String result = McpTools.clearCacheFor(workspace, all);
                 return textResult(result);
             }
         );
@@ -5108,7 +5132,7 @@ public class AITools {
         ToolInputSchema inputSchema = new ToolInputSchema(properties, Collections.singletonList("file_path"));
 
         server.addTool("dlqq_read_office_file",
-            "读取Office文件（PDF、DOC、DOCX、XLS、XLSX、PPT、PPTX）并转换为Markdown格式。支持分页/分段处理：PDF按页码、Word按段落、Excel按Sheet、PPT按幻灯片。转换后的文件保存在 .dlqq/cache 目录，返回Markdown文件路径。",
+            "读取Office文件（PDF、DOC、DOCX、XLS、XLSX、PPT、PPTX）并转换为Markdown格式。支持分页/分段处理：PDF按页码、Word按段落、Excel按Sheet、PPT按幻灯片。转换后的文件保存在当前会话缓存目录（.dlqq/cache/<工作区>/<会话>），返回Markdown文件路径。",
             inputSchema,
             arguments -> {
                 String filePath = (String) arguments.get("file_path");

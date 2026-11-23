@@ -16,7 +16,7 @@
 7. **Single artifact**: the JAR is always named `dlqq_mcp_server.jar`; `build_and_copy.bat` syncs it to `.runtime\`.
 8. **Manual release storage**: `.release\` is only where the user stores zipped release packages; no script handles it.
 9. **Tool changes must update the docs**: after adding, removing or changing an MCP tool, update [README.en.md](README.en.md) and the tool overview in this file.
-10. **Diagnostic logs**: `StdioTransport`, `McpServer` and `MCPServerMain` write detailed connection diagnostics to `<workspace>/.dlqq/log/logger/` and `<workspace>/.dlqq/log/stderr/`, named by time (a new file per start).
+10. **Diagnostic logs**: `StdioTransport`, `McpServer` and `MCPServerMain` write detailed connection diagnostics to `<jar dir>/.dlqq/log/<stdio|http>/<startup time>.log` (a new file per start, logger and stderr merged).
 11. **Temporary files**: temporary files and intermediate output **must not go to the system temp directory on drive C**. Put them under the local temporary working directory inside the project root (see `AIRES.md`), grouped by type, and clean them up when done.
 12. **No scripted bulk code edits**: PowerShell / Python / sed / awk and similar tools must not be used to bulk search-replace or rewrite source code. Every code change must be made file by file and location by location with the editing tool; if a large refactor is really needed, list the changes for user approval first, then apply them one by one.
 13. **No git commands whatsoever**: including but not limited to `git status`, `git diff`, `git log`, `git checkout/restore/reset`, `git add/commit/push/pull/stash`. Version control is handled by the user only; the AI must never run any git command (not even for reading or rollback).
@@ -34,6 +34,7 @@
 25. **Never write files through shell redirection**: create or modify text, code and docs with the MCP file tools required by rule 26. Never use pwsh / cmd (`Set-Content`, `>` redirection, `[IO.File]::WriteAllText`). Files produced by programs (build output, rendered images, ...) are exempt.
 26. **All file and command operations must go through the MCP channel**: reading/writing files, editing text, running commands and building must always call this project's MCP tools — `dlqq_read_file` / `dlqq_search_text_in_file` to read, `dlqq_create_file` / `dlqq_overwrite_file` / `dlqq_append_file` / `dlqq_replace_text_in_file` / `dlqq_replace_lines_in_file` to write, `dlqq_run_command` to run commands, `dlqq_build_project` / `dlqq_rebuild_project` to build. Do not fall back to the native `read`/`write`/`edit` tools or pwsh. The MCP workspace must point at the current project directory (`dlqq_workspace_set`).
 27. **Third-party license review**: prefer libraries under the **MIT** license. For any non-MIT library, you must **search the web** to confirm whether its license permits bundling/redistribution with this program; only then may it be added. If the license does not permit it (or cannot be confirmed), **stop and report** the library, version, license and restrictions to the user, and let the user decide — never add it unilaterally.
+28. **Finish a change in one pass**: when the user requests a change, update every affected code, configuration and documentation file **in the same pass, then report**; never stop halfway with "not done yet / remaining steps / next round" and never split work that could be completed into follow-up questions. An AI model **cannot observe its own context usage**, so there is **no such thing as "context is full"** as a reason to refuse, shrink or interrupt a change. Only genuine external limits (denied permission, unavailable tool, a decision only the user can make) may pause work, and the exact limit plus the remaining work must be stated explicitly.
 
 ## 2. Runtime requirements
 
@@ -204,17 +205,25 @@ On a session's first request the server may initialize that session's workspace 
 `_meta`'s session workspace (default key `dsh/workspace`, an absolute directory); an invalid,
 missing or `.dlqq`-nested path silently falls back to the default workspace.
 
-Permissions and timeouts: `permission.resource.level` (resource, default approval) and
-`permission.operation.level` (operation, default approval); the legacy `workspace.write.mode` is
-gone. Permissions can only be changed via `dlqq_workspace_permission_set` (downgrade executes
-directly, escalation shows a countdown approval; `set_mcp_properties` rejects permission keys).
-Workspace switching always requires approval; the same workspace returns immediately. The tool
-total timeout = approval + execution, default 50 s, overridable with
+Permissions and timeouts: `permission.resource.level` (resource, default **chat, conversation
+mode**) and `permission.operation.level` (operation, default **chat**); the legacy
+`workspace.write.mode` is gone. A new workspace starts as chat and must be escalated through the
+permission tool first; all sessions on the same workspace share one settings file. Permissions can
+only be changed via `dlqq_workspace_permission_set` (downgrade executes directly, escalation shows a
+countdown approval; `set_mcp_properties` rejects permission keys). Workspace switching always
+requires approval, a failed set keeps the current workspace, and the same workspace returns
+immediately. The tool total timeout = approval + execution, default 50 s, overridable with
 `_meta["dlqq/toolTimeoutSeconds"]`; on timeout the approval window closes and execution is
-aborted; `no_wait` background calls are unbounded. AI can never modify anything under `.dlqq`.
+aborted; `no_wait` background calls are unbounded.
 
-Runtime directories (created on first start, ignored by `.gitignore`): inside the workspace, `.dlqq/log/{logger,stderr}`, `.dlqq/cache` and `.dlqq/settings/settings.properties` (the workspace defaults to the process CWD).
-
+Runtime directories (single global location, created on first start): under
+`<jar dir>/.dlqq/` — `workspace_config.json` (path -> hash), `cache/<workspace hash>/<session hash>`
+(cache), `data/` (shared BLE scripts/icons), `log/{stdio,http}/<startup time>.log` (one file per
+start) and `settings/<workspace hash>/settings.properties`; plus the fallback workspace
+`<jar dir>/default_workspace/`. If `.dlqq` or `default_workspace` cannot be created or written,
+startup fails (dialog + stderr + exit code) and no `.dlqq` is written into workspaces. AI can never
+read or write `.dlqq` at any permission level except the content of the current session cache
+directory; a workspace must never be located under `.dlqq`.
 ## 6. Tool overview
 
 **159** tools in total. Implementations live in `mcp/tools/`; parameters are documented in [README.en.md](README.en.md).
@@ -239,11 +248,11 @@ new names (`dlqq_kill_command`, ...).
 | MCP data/properties | 14 | version info, dynamic tool management (hide/show/refresh/reset/run), workspace, property read/write, cleanup of data/cache/logs |
 | Tool list / environment | 2 | `dlqq_get_tool_list`, `dlqq_get_tools_env` |
 
-**Dynamic tool management**: `dlqq_mcp_hide_tools` (hide and persist), `dlqq_mcp_show_tools` (restore specific tools), `dlqq_mcp_refresh_tools` (push `notifications/tools/list_changed` only), `dlqq_mcp_reset_tools` (restore everything and clear the config), `dlqq_mcp_run_tools` (call any registered tool by name). Exclusions are stored in `mcp.tools.excluded` (comma separated) in `<workspace>/.dlqq/settings/settings.properties` and survive a server restart; the management tools are protected. In HTTP mode an immediate refresh requires the client to hold an open SSE connection.
+**Dynamic tool management**: `dlqq_mcp_hide_tools` (hide and persist), `dlqq_mcp_show_tools` (restore specific tools), `dlqq_mcp_refresh_tools` (push `notifications/tools/list_changed` only), `dlqq_mcp_reset_tools` (restore everything and clear the config), `dlqq_mcp_run_tools` (call any registered tool by name). Exclusions are stored in `mcp.tools.excluded` (comma separated) in `<jar dir>/.dlqq/settings/<workspace hash>/settings.properties` and survive a server restart; the management tools are protected. In HTTP mode an immediate refresh requires the client to hold an open SSE connection.
 
-**Workspace**: `dlqq_workspace_set` / `dlqq_workspace_get` / `dlqq_workspace_reset` / `dlqq_workspace_permission_set` / `dlqq_get_cwd_path`, plus the `--workspace <dir>` startup argument. If neither is given, the workspace is the process CWD. **The workspace path is not persisted** (only `--workspace` or a runtime setting, so it must be set again after a restart). Permissions use two settings: `permission.resource.level` (resource) and `permission.operation.level` (operation); the legacy `workspace.write.mode` is gone. All other settings (`script.*`, `response.max.size`, `mcp.tools.excluded`, ...) are persisted in `<workspace>/.dlqq/settings/settings.properties`, and switching the workspace reloads them. Relative paths, script working directories and AI rule bases are resolved against the workspace; the workspace `.dlqq` directory (logs, cache, settings) moves with it and **AI can never modify `.dlqq` at any permission level**.
+**Workspace**: `dlqq_workspace_set` / `dlqq_workspace_get` / `dlqq_workspace_reset` / `dlqq_workspace_permission_set` / `dlqq_get_cwd_path`, plus the `--workspace <dir>` startup argument. The default workspace is the process CWD; when the CWD is unusable or a fallback is needed the server uses `<jar dir>/default_workspace` (the CWD is never a fallback target). **The workspace path is not persisted**. Permissions use two settings: `permission.resource.level` (resource, default chat for a new workspace) and `permission.operation.level` (operation, default chat); the legacy `workspace.write.mode` is gone. All other settings (`script.*`, `response.max.size`, `mcp.tools.excluded`, ...) are persisted in `<jar dir>/.dlqq/settings/<workspace hash>/settings.properties`, and switching the workspace reloads them. Relative paths, script working directories and AI rule bases are resolved against the workspace; cache is isolated as `<jar dir>/.dlqq/cache/<workspace hash>/<session hash>/` and AI may only read/write content inside that session cache directory.
 
-**Script tool rules**: `dlqq_build_project` / `dlqq_rebuild_project` / `dlqq_chip_*` / `dlqq_*erase_download` / `dlqq_run_project` / `dlqq_debug_project` and friends have **no built-in default script paths**. When unconfigured they fail with "configure the tool path first" and point at the matching `dlqq_set_*_script`. Settings are written under `script.*` in `<workspace>/.dlqq/settings/settings.properties`.
+**Script tool rules**: `dlqq_build_project` / `dlqq_rebuild_project` / `dlqq_chip_*` / `dlqq_*erase_download` / `dlqq_run_project` / `dlqq_debug_project` and friends have **no built-in default script paths**. When unconfigured they fail with "configure the tool path first" and point at the matching `dlqq_set_*_script`. Settings are written under `script.*` in `<jar dir>/.dlqq/settings/<workspace hash>/settings.properties`.
 
 ## 7. AI rule files
 

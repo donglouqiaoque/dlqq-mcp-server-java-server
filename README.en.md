@@ -311,15 +311,17 @@ The workspace affects relative paths in file/directory/search/binary/ZIP/Office/
 | `permission.operation.level` | **Operation permission**: mouse, keyboard, screen, serial, BLE, WiFi, USB |
 | `tool.policy.<tool>` | Per-tool override when the level is `custom` (allow / approve / deny) |
 
-Resource permission defaults to `approval` (outside-workspace operations need approval).
+Resource permission defaults to `chat` (conversation mode: no resource operations).
 Levels: `chat` < `readonly` < `workspace` < `approval` < `highrisk` < `full` < `custom`.
 
-Operation permission defaults to `approval` (needs approval).
-Levels: `readonly` < `approval` < `highrisk` < `full` < `custom`.
+Operation permission defaults to `chat` (conversation mode: no peripheral operations).
+Levels: `chat` < `readonly` < `approval` < `highrisk` < `full` < `custom`.
 
-- The legacy `workspace.write.mode` is deprecated: no longer read, and removed from the
-  settings file when the new keys are written;
-- AI can never modify anything under `.dlqq` (settings, logs, cache, scripts) at any permission level;
+- A new workspace (including process CWD and `default_workspace`) starts as `chat`; escalate with the permission tool first;
+- All sessions pointing at the same workspace share one settings file; switching workspace switches settings and permissions;
+- The legacy `workspace.write.mode` is deprecated: no longer read and removed when the new keys are written;
+- AI can never read or write anything under `.dlqq` at any permission level, except the content inside the current
+  session cache directory (`.dlqq/cache/<workspace hash>/<session hash>/`);
 - Permissions can only be changed through `dlqq_workspace_permission_set`
   (`dlqq_set_mcp_properties` rejects permission-related keys).
 
@@ -327,7 +329,8 @@ Levels: `readonly` < `approval` < `highrisk` < `full` < `custom`.
 
 - `dlqq_workspace_set` / `dlqq_workspace_reset` are callable under **any** permission level;
 - Same target as the current workspace -> returns "no change" without any dialog;
-- Switching/resetting the workspace **always requires user approval** in a countdown dialog.
+- Switching/resetting the workspace **always requires user approval** in a countdown dialog;
+- A failed set (missing / not a directory / under `.dlqq`) is **rejected and the current workspace is kept** (no fallback).
 
 ### Escalation
 
@@ -342,6 +345,33 @@ Levels: `readonly` < `approval` < `highrisk` < `full` < `custom`.
 - Background calls (`no_wait=true`) return immediately and are not bounded by the total timeout;
 - On timeout the approval window is closed, execution is aborted and a clear error is returned;
 - Every approval window counts down the remaining tool time and auto-closes on timeout.
+
+## Runtime directory (single global .dlqq)
+
+All runtime data lives in **one directory next to the jar**; no `.dlqq` is created inside user workspaces anymore:
+
+```text
+<deploy dir>/
+├── dlqq_mcp_server.jar
+├── default_workspace/                 # fallback workspace (used when a workspace is unusable)
+└── .dlqq/
+    ├── workspace_config.json          # workspace absolute path -> hash mapping
+    ├── cache/<workspace hash>/<session hash>/  # cache (workspace + session levels)
+    ├── data/                          # shared data (BLE scripts, icons, ...)
+    ├── log/stdio/<startup time>.log   # one log file per process start, per transport
+    ├── log/http/<startup time>.log
+    └── settings/<workspace hash>/settings.properties
+```
+
+- **Workspace resolution**: session `_meta` workspace -> `--workspace` -> process CWD; any fallback goes to
+  `default_workspace` (CWD is only the default value, never a fallback target);
+- **Workspace identity**: normalized absolute path (case-insensitive) hashed with SHA-256 (8..32 hex chars,
+  lengthened on collision);
+- **Startup failure**: if `.dlqq` or `default_workspace` cannot be created or written, startup fails
+  (dialog + stderr + exit code); there is no user-directory fallback;
+- **Logs**: one new file per process start, logger and stderr merged, collisions suffixed `-2`, `-3`;
+- **Cleanup tools**: `dlqq_clear_mcp_cache` accepts `workspace`/`all`; `dlqq_clear_mcp_data` only clears
+  cache/data/log and **never deletes settings** (permission config is protected).
 
 ## Multi-session in one process (session isolation)
 

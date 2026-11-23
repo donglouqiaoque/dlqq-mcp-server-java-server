@@ -16,7 +16,7 @@
 7. **产物统一输出**：JAR 固定名为 `dlqq_mcp_server.jar`，构建后由 `build_and_copy.bat` 同步到 `.runtime\`。
 8. **发行包手动管理**：`.release\` 仅用于用户手动存放压缩后的发布包，不写脚本处理。
 9. **工具变更要同步文档**：增删或修改 MCP 工具后，必须同步更新 [README.md](README.md) 与本文的工具速查。
-10. **诊断日志**：`StdioTransport`、`McpServer`、`MCPServerMain` 有详细连接诊断日志，输出到 `<工作区>/.dlqq/log/logger/` 与 `<工作区>/.dlqq/log/stderr/`，按时间命名（每次启动新建）。
+10. **诊断日志**：`StdioTransport`、`McpServer`、`MCPServerMain` 有详细连接诊断日志，统一输出到 `<jar 同级>/.dlqq/log/<stdio|http>/<启动时间>.log`（每次启动新建一个文件，logger 与 stderr 合并写入）。
 11. **临时文件位置**：临时文件/中间产物**禁止放 C 盘系统临时目录**，统一放工程根目录下的本地临时工作目录（约定见 `AIRES.md`），按类型分子目录，用完自行清理。
 12. **禁止用脚本批量修改代码**：不允许用 PowerShell / Python / sed / awk 等脚本对源码做批量查找替换或自动改写。所有代码修改必须逐个文件、逐个位置人工确认后用编辑工具完成；确需大范围调整时，先列出清单交由用户确认，再逐项修改。
 13. **禁止使用任何 git 命令**：包括但不限于 `git status`、`git diff`、`git log`、`git checkout/restore/reset`、`git add/commit/push/pull/stash` 等。版本管理由用户本人操作，AI 一律不得执行任何 git 命令（读取与回滚都不允许）。
@@ -34,6 +34,7 @@
 25. **写文件禁止用 shell 重定向**：创建或修改文本、代码、文档必须用规则 26 指定的 MCP 文件工具；禁止用 pwsh / cmd（`Set-Content`、`>` 重定向、`[IO.File]::WriteAllText`）改写文件。构建、渲染图片等由程序产出的文件除外。
 26. **所有文件与命令操作必须走 MCP 通道**：读写文件、修改文本、执行命令、构建发布一律调用本项目的 MCP 工具——读文件用 `dlqq_read_file` / `dlqq_search_text_in_file`，写文件用 `dlqq_create_file` / `dlqq_overwrite_file` / `dlqq_append_file` / `dlqq_replace_text_in_file` / `dlqq_replace_lines_in_file` 等，执行命令用 `dlqq_run_command`，构建用 `dlqq_build_project` / `dlqq_rebuild_project`；不得改用原生 `read`/`write`/`edit` 工具或 pwsh 绕过。MCP 工作区必须指向当前工程目录（`dlqq_workspace_set`）。
 27. **第三方库许可证审查**：新增依赖时优先选择 **MIT** 协议的库。若拟采用非 MIT 协议的库，必须**联网检索**该协议是否允许随本程序一起分发（bundling / redistribution）；确认允许方可引入。若检索结果表明不允许（或无法确认），**必须暂停并向用户说明**该库、版本、协议与限制，由用户决定是否采用，禁止自行添加。
+28. **要改就一次性改完**：用户提出修改需求后，必须把该需求涉及的代码、配置、文档**一次性全部改完再汇报**；**禁止**改到一半以"尚未完成/后续步骤/下一轮继续"收尾，也禁止把本可一次完成的工作拆给用户追问。AI 大模型**无法获取当前上下文占用率**，因此**不存在"上下文空间已满"之类的说法**作为拒绝、缩减或中断修改的理由；只有遇到真实外部限制（权限被拒、工具不可用、必须由用户决策）时才可暂停，并须明确说明具体限制和剩余工作。
 
 ## 二、运行环境要求
 
@@ -203,14 +204,18 @@ src/main/resources/
 会话首次收到请求时，可用 `_meta` 中的会话工作区（默认键 `dsh/workspace`，值为绝对目录）初始化
 该会话的工作区；路径非法/不存在/位于 `.dlqq` 下时静默回退到默认工作区。
 
-权限与超时：`permission.resource.level`（资源权限，默认 approval）与 `permission.operation.level`
-（操作权限，默认 approval）两套配置；旧 `workspace.write.mode` 已废弃。权限只能通过
-`dlqq_workspace_permission_set` 修改（降权直行、提权弹带倒计时审批；`set_mcp_properties` 拒绝权限键）。
-工作区切换始终需要审批；同工作区直接返回。工具总超时=审批+运行，默认 50 秒，可由
-`_meta["dlqq/toolTimeoutSeconds"]` 指定；超时立即关闭审批窗口并终止执行；`no_wait` 后台调用不受限。
-`.dlqq` 目录任何权限下都禁止 AI 修改。
+权限与超时：`permission.resource.level`（资源权限，默认 **chat 对话模式**）与
+`permission.operation.level`（操作权限，默认 **chat**）两套配置；旧 `workspace.write.mode` 已废弃。
+新工作区首次使用即写入 chat，需先用权限工具提权；同一工作区多会话共用一份 settings。
+权限只能通过 `dlqq_workspace_permission_set` 修改（降权直行、提权弹带倒计时审批；`set_mcp_properties` 拒绝权限键）。
+工作区切换始终需要审批，设置失败保持当前工作区；同工作区直接返回。工具总超时=审批+运行，默认 50 秒，
+可由 `_meta["dlqq/toolTimeoutSeconds"]` 指定；超时立即关闭审批窗口并终止执行；`no_wait` 后台调用不受限。
 
-运行期目录（首次启动自动创建，已被 `.gitignore` 忽略）：工作区内 `.dlqq/log/{logger,stderr}`、`.dlqq/cache`、`.dlqq/settings/settings.properties`（工作区默认 = 进程 CWD）。
+运行期目录（全局唯一，首次启动自动创建）：`<jar 同级>/.dlqq/` 下的 `workspace_config.json`（路径→hash）、
+`cache/<工作区hash>/<会话hash>`（缓存）、`data/`（BLE 脚本/图标等共享数据）、`log/{stdio,http}/<启动时间>.log`
+（每次启动一个文件）、`settings/<工作区hash>/settings.properties`；另有兜底工作区 `<jar 同级>/default_workspace/`。
+`.dlqq` 与 `default_workspace` 创建/写入失败时直接启动失败（弹窗 + stderr + 退出码）；不再往工作区写 `.dlqq`。
+`.dlqq` 内除当前会话缓存目录内容外，AI 任何权限下都禁止读写；工作区不能位于 `.dlqq` 下。
 
 ## 六、工具速查
 
@@ -235,11 +240,11 @@ src/main/resources/
 | MCP 数据/属性 | 14 | 版本信息、动态工具管理（hide/show/refresh/reset/run）、工作区、属性读写、清理数据/缓存/日志 |
 | 工具列表 / 环境 | 2 | `dlqq_get_tool_list`、`dlqq_get_tools_env` |
 
-**动态工具管理**：`dlqq_mcp_hide_tools`（隐藏并持久化）、`dlqq_mcp_show_tools`（恢复指定工具）、`dlqq_mcp_refresh_tools`（仅推送 `notifications/tools/list_changed`）、`dlqq_mcp_reset_tools`（恢复全部并清空配置）、`dlqq_mcp_run_tools`（按名称直接调用任意已注册工具）。排除项存于 `<工作区>/.dlqq/settings/settings.properties` 的 `mcp.tools.excluded`（逗号分隔），服务端重启后仍保持隐藏状态；管理工具受保护，不允许被隐藏。HTTP 模式下立即刷新需要客户端已打开 SSE 长连接。
+**动态工具管理**：`dlqq_mcp_hide_tools`（隐藏并持久化）、`dlqq_mcp_show_tools`（恢复指定工具）、`dlqq_mcp_refresh_tools`（仅推送 `notifications/tools/list_changed`）、`dlqq_mcp_reset_tools`（恢复全部并清空配置）、`dlqq_mcp_run_tools`（按名称直接调用任意已注册工具）。排除项存于 `<jar 同级>/.dlqq/settings/<工作区hash>/settings.properties` 的 `mcp.tools.excluded`（逗号分隔），服务端重启后仍保持隐藏状态；管理工具受保护，不允许被隐藏。HTTP 模式下立即刷新需要客户端已打开 SSE 长连接。
 
-**工作区**：`dlqq_workspace_set` / `dlqq_workspace_get` / `dlqq_workspace_reset` / `dlqq_workspace_permission_set` / `dlqq_get_cwd_path`；启动参数 `--workspace <dir>`。未指定且未运行期设置时，工作区 = 进程 CWD。**工作区路径不持久化**（仅 `--workspace` 或运行期设置，重启需重新指定）。权限分两套配置：`permission.resource.level`（资源权限）与 `permission.operation.level`（操作权限），旧 `workspace.write.mode` 已废弃；其它配置（`script.*`、`response.max.size`、`mcp.tools.excluded` 等）持久化在工作区内 `.dlqq/settings/settings.properties`，切换工作区自动重载。所有工具的相对路径、脚本执行目录、AI 规则基准都基于工作区解析；工作区内 `.dlqq`（日志、缓存、配置）整个随工作区移动，且 **AI 任何权限下都不能修改 `.dlqq`**。
+**工作区**：`dlqq_workspace_set` / `dlqq_workspace_get` / `dlqq_workspace_reset` / `dlqq_workspace_permission_set` / `dlqq_get_cwd_path`；启动参数 `--workspace <dir>`。默认工作区 = 进程 CWD，CWD 不可用或需要回退时使用 `<jar 同级>/default_workspace`（CWD 不承担回退职责）。**工作区路径不持久化**。权限分两套配置：`permission.resource.level`（资源权限，新工作区默认 chat）与 `permission.operation.level`（操作权限，默认 chat），旧 `workspace.write.mode` 已废弃；其它配置（`script.*`、`response.max.size`、`mcp.tools.excluded` 等）持久化在 `<jar 同级>/.dlqq/settings/<工作区hash>/settings.properties`，切换工作区自动重载。所有工具的相对路径、脚本执行目录、AI 规则基准都基于工作区解析；缓存按 `<jar 同级>/.dlqq/cache/<工作区hash>/<会话hash>/` 两级隔离，AI 只能读写该会话缓存目录内的内容。
 
-**脚本工具规则**：`dlqq_build_project` / `dlqq_rebuild_project` / `dlqq_chip_*` / `dlqq_*erase_download` / `dlqq_run_project` / `dlqq_debug_project` 等**没有任何内置默认脚本路径**；未配置时直接报错“需要先配置工具路径”，并提示对应的 `dlqq_set_*_script`。配置写入 `<工作区>/.dlqq/settings/settings.properties` 的 `script.*` 项。
+**脚本工具规则**：`dlqq_build_project` / `dlqq_rebuild_project` / `dlqq_chip_*` / `dlqq_*erase_download` / `dlqq_run_project` / `dlqq_debug_project` 等**没有任何内置默认脚本路径**；未配置时直接报错“需要先配置工具路径”，并提示对应的 `dlqq_set_*_script`。配置写入 `<jar 同级>/.dlqq/settings/<工作区hash>/settings.properties` 的 `script.*` 项。
 
 ## 七、AI 规则文件
 

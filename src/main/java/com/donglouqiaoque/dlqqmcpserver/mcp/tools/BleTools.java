@@ -12,13 +12,14 @@ import java.util.concurrent.TimeUnit;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
+import com.donglouqiaoque.dlqqmcpserver.utils.RuntimeDirs;
 import com.donglouqiaoque.dlqqmcpserver.utils.Workspace;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.net.InetSocketAddress;
 import java.net.URLDecoder;
-import java.nio.file.attribute.DosFileAttributeView;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.text.SimpleDateFormat;
 import java.time.format.DateTimeFormatter;
 import java.time.LocalDateTime;
@@ -298,31 +299,11 @@ public class BleTools {
      */
     private String releasePythonScript() {
         try {
-            String projectDir = System.getProperty("user.dir");
-            String pythonDir = projectDir + File.separator + ".dlqq" + File.separator + "script" + File.separator + "python";
-            File dir = new File(pythonDir);
+            Path pythonPath = RuntimeDirs.getDataRoot().resolve("script").resolve("python");
+            String pythonDir = pythonPath.toString();
+            File dir = pythonPath.toFile();
             if (!dir.exists()) {
                 dir.mkdirs();
-            }
-
-            // 创建 .dlqq/.gitignore 文件，忽略该目录下的所有内容
-            File dlqqDir = new File(projectDir + File.separator + ".dlqq");
-            File gitignoreFile = new File(dlqqDir, ".gitignore");
-            if (!gitignoreFile.exists()) {
-                try (FileWriter writer = new FileWriter(gitignoreFile)) {
-                    writer.write("*\n");
-                }
-            }
-
-            // 尝试将 .dlqq 目录设置为隐藏（Windows），失败则忽略
-            try {
-                DosFileAttributeView dosView = Files.getFileAttributeView(
-                        dlqqDir.toPath(), DosFileAttributeView.class);
-                if (dosView != null) {
-                    dosView.setHidden(true);
-                }
-            } catch (Exception ignored) {
-                // 设置隐藏失败，忽略
             }
 
             // 从资源释放ble_tools.py（每次启动都强制覆盖，确保使用最新版本）
@@ -351,8 +332,8 @@ public class BleTools {
                 }
                 System.err.println("已释放 ble_tools.py 到: " + scriptPath);
 
-                // 释放图标文件到 .dlqq/image 目录
-                String imageDir = projectDir + File.separator + ".dlqq" + File.separator + "image";
+                // 释放图标文件到全局 data/image 目录
+                String imageDir = RuntimeDirs.getDataRoot().resolve("image").toString();
                 File imgDir = new File(imageDir);
                 if (!imgDir.exists()) {
                     imgDir.mkdirs();

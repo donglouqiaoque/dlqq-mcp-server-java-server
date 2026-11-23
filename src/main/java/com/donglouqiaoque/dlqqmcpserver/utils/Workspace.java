@@ -5,26 +5,19 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.nio.file.attribute.DosFileAttributeView;
 import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 工作区根目录与修改权限管理（会话级）。
+ * 工作区根目录与权限管理（会话级）。
  *
- * <p>每个会话（对话）拥有独立的工作区：路径<b>不持久化</b>，来自启动参数
- * {@code --workspace <dir>} 或运行期 {@code dlqq_workspace_set}；未指定时使用进程 CWD。
- * 会话标识由 {@link SessionScope} 维护，本类所有读写都作用于<b>当前请求所属会话</b>，
- * 因此同一个服务进程可以同时服务多个对话而互不影响。</p>
+ * <p>工作区路径<b>不持久化</b>：默认取进程 CWD（或启动参数 {@code --workspace}），
+ * 会话首次请求可通过 {@code _meta} 下发，运行期可用 {@code dlqq_workspace_set} 切换。
+ * 工作区不可用时统一回退 {@code <部署目录>/default_workspace}。</p>
  *
- * <p>修改权限持久化在工作区的 {@code .dlqq/settings/settings.properties}
- * （键 {@code workspace.write.mode}）：</p>
- * <ul>
- *   <li>{@code readonly}：只读模式，禁止任何文件修改；</li>
- *   <li>{@code workspace}：工作区修改（默认），只允许修改工作区内的文件；</li>
- *   <li>{@code approval}：工作区外审批，工作区内直接修改、工作区外弹窗确认；</li>
- *   <li>{@code full}：完全权限，允许修改任意位置的文件。</li>
- * </ul>
+ * <p>每个工作区的配置持久化在全局运行时目录：
+ * {@code <部署目录>/.dlqq/settings/<工作区hash>/settings.properties}。
+ * 新工作区首次使用时写入默认权限 {@code chat}（对话模式：禁止任何资源与外设操作）。</p>
  */
 public final class Workspace {
 
@@ -34,7 +27,11 @@ public final class Workspace {
     public static final String SOURCE_RUNTIME = "runtime setting";
     /** 工作区来源：进程工作目录 */
     public static final String SOURCE_CWD = "process working directory";
+    /** 工作区来源：兜底工作区 */
+    public static final String SOURCE_DEFAULT = "default workspace";
 
+    /** 对话模式：禁止任何资源操作 */
+    public static final String PERMISSION_CHAT = "chat";
     /** 只读模式：禁止修改任何文件 */
     public static final String PERMISSION_READONLY = "readonly";
     /** 工作区修改模式：只允许修改工作区内的文件 */
@@ -44,20 +41,33 @@ public final class Workspace {
     /** 完全权限：允许修改任意位置的文件 */
     public static final String PERMISSION_FULL = "full";
 
-    /** 资源权限配置键（替代旧的 workspace.write.mode） */
+    /** 新工作区的默认资源权限（对话模式）。 */
+    public static final String DEFAULT_PERMISSION = PERMISSION_CHAT;
+    /** 新工作区的默认操作权限（对话模式）。 */
+    public static final String DEFAULT_OPERATION_PERMISSION = PERMISSION_CHAT;
+
+    /** 资源权限配置键 */
     public static final String PERMISSION_KEY = "permission.resource.level";
     /** 操作权限配置键（鼠标/键盘/屏幕/串口/BLE/WiFi/USB 等外设操作） */
     public static final String OPERATION_PERMISSION_KEY = "permission.operation.level";
-    /** 旧的工作区写权限键：只做兼容读取，设置时自动从配置文件中清理 */
+    /** 旧的工作区写权限键：只做兼容清理 */
     public static final String LEGACY_PERMISSION_KEY = "workspace.write.mode";
-    /** 工作区内配置文件相对路径（与历史路径保持一致） */
+    /**
+     * 旧的工作区本地配置相对路径。
+     *
+     * @deprecated 配置已迁移到全局 {@code .dlqq/settings/<hash>/settings.properties}，不要再使用
+     */
+    @Deprecated
     public static final String SETTINGS_RELATIVE_PATH = ".dlqq/settings/settings.properties";
+
+    private static final String SETTINGS_FILE_NAME = "settings.properties";
 
     private Workspace() {
     }
 
     /**
-     * 初始化默认基准工作区（服务启动时调用一次）：优先启动参数，否则进程 CWD。
+     * 初始化默认基准工作区（服务启动时调用一次）：优先启动参数，否则进程 CWD；
+     * 两者都不可用时回退兜底工作区。
      *
      * @param cliWorkspace 启动参数 --workspace 的值，可为 null
      */
@@ -69,65 +79,27 @@ public final class Workspace {
      * 运行期设置<b>当前会话</b>的工作区（不持久化；是否允许由调用方先做用户审批）。
      *
      * @param directory 已存在的绝对目录
-     * @throws IllegalArgumentException 目录不存在或不是目录
+     * @throws IllegalArgumentException 目录不存在、不是目录，或位于 .dlqq 下
      */
     public static void setRoot(String directory) {
         Path path = toExistingDirectory(directory);
         if (path == null) {
             throw new IllegalArgumentException("工作区必须是已存在的绝对目录: " + directory);
         }
+        if (touchesDlqq(path)) {
+            throw new IllegalArgumentException("工作区不能位于 .dlqq 目录下: " + directory);
+        }
         SessionScope.setCurrentRoot(path, SOURCE_RUNTIME);
     }
 
-    /** 把当前会话回退到启动参数指定的工作区（若有效），否则回退到进程 CWD。 */
+    /** 把当前会话重置到启动默认工作区。 */
     public static void resetToDefault() {
         SessionScope.resetCurrentToDefault();
     }
 
     /** 当前会话的工作区根目录（绝对路径）。 */
     public static Path getRoot() {
-        Path root = SessionScope.currentRoot();
-        ensureDlqqMetadata(root);
-        return root;
-    }
-
-    /**
-     * 确保工作区下的 .dlqq 目录存在并带有 .gitignore（内容为 *，即忽略该目录全部内容）。
-     *
-     * <p>放在 getRoot() 里统一兜底：无论 .dlqq 是由日志初始化、缓存目录、
-     * 设置文件还是后台程序目录首次创建，只要访问过工作区，就一定会补齐
-     * .gitignore，避免日志/缓存被误提交到 git。检查结果按会话缓存。</p>
-     */
-    private static void ensureDlqqMetadata(Path base) {
-        if (base == null) {
-            return;
-        }
-        String key = base.toAbsolutePath().toString();
-        if (key.equals(SessionScope.currentEnsuredRoot())) {
-            return;
-        }
-        try {
-            Path dlqqDir = base.resolve(".dlqq");
-            if (!Files.isDirectory(dlqqDir)) {
-                Files.createDirectories(dlqqDir);
-            }
-            Path gitignore = dlqqDir.resolve(".gitignore");
-            if (!Files.exists(gitignore)) {
-                Files.writeString(gitignore, "*\n", StandardCharsets.UTF_8);
-            }
-            // Windows 下把 .dlqq 设为隐藏目录（资源管理器默认不可见，避免误提交/误删）
-            try {
-                DosFileAttributeView dosView = Files.getFileAttributeView(dlqqDir, DosFileAttributeView.class);
-                if (dosView != null) {
-                    dosView.setHidden(true);
-                }
-            } catch (Exception ignored) {
-                // 非 Windows 平台或文件系统不支持时忽略
-            }
-            SessionScope.setCurrentEnsuredRoot(key);
-        } catch (Exception ignored) {
-            // 只读工作区或权限不足时忽略，不影响主流程
-        }
+        return SessionScope.currentRoot();
     }
 
     /** 当前会话的工作区来源说明。 */
@@ -140,14 +112,16 @@ public final class Workspace {
         return SessionScope.getBaseCliPath();
     }
 
-    /** 当前会话的修改权限：readonly / workspace / approval / full。 */
+    /** 当前会话的资源权限。 */
     public static String getPermission() {
         return SessionScope.currentPermission();
     }
 
-    /** 修改权限的中文说明。 */
+    /** 资源权限的中文说明。 */
     public static String getPermissionLabel() {
         switch (getPermission()) {
+            case PERMISSION_CHAT:
+                return "对话模式（chat）";
             case PERMISSION_READONLY:
                 return "只读模式（readonly）";
             case PERMISSION_FULL:
@@ -159,9 +133,38 @@ public final class Workspace {
         }
     }
 
-    /** 当前会话工作区的 settings.properties 路径（权限与其它配置都存这里）。 */
+    /** 当前会话工作区的 settings.properties 路径（权限与其它配置都存在这里）。 */
     public static Path getSettingsFile() {
-        return SessionScope.currentRoot().resolve(SETTINGS_RELATIVE_PATH).normalize();
+        return settingsFileOf(SessionScope.currentRoot());
+    }
+
+    /**
+     * 指定工作区的 settings.properties 路径（全局运行时目录下）。
+     *
+     * @param root 工作区根目录
+     * @return {@code <部署目录>/.dlqq/settings/<hash>/settings.properties}
+     */
+    public static Path settingsFileOf(Path root) {
+        String hash = WorkspaceRegistry.hashFor(root);
+        return RuntimeDirs.getSettingsRoot().resolve(hash).resolve(SETTINGS_FILE_NAME);
+    }
+
+    /**
+     * 确保指定工作区的 settings 文件存在；不存在时写入默认 chat 权限。
+     *
+     * @param root 工作区根目录
+     */
+    public static void ensureSettingsFileFor(Path root) {
+        Path file = settingsFileOf(root);
+        if (Files.isRegularFile(file)) {
+            return;
+        }
+        try {
+            writeSettingsValue(file, PERMISSION_KEY, DEFAULT_PERMISSION);
+            writeSettingsValue(file, OPERATION_PERMISSION_KEY, DEFAULT_OPERATION_PERMISSION);
+        } catch (IOException e) {
+            System.err.println("[Workspace] 创建默认配置失败: " + file + " (" + e.getMessage() + ")");
+        }
     }
 
     /** 当前工作区的权限配置文件路径（与 settings.properties 同一文件）。 */
@@ -197,14 +200,25 @@ public final class Workspace {
     }
 
     /**
-     * 检查是否允许修改指定路径（写操作前调用）。
+     * 检查是否允许修改指定路径（写操作前调用，供工具层使用）。
      *
      * @param path 已解析的绝对路径
      * @return null 表示允许；否则返回错误消息
      */
     public static String checkWrite(Path path) {
         Path absolute = path.toAbsolutePath().normalize();
+        // 当前会话缓存目录内容：始终允许读写（不受权限等级限制）
+        if (isCacheContent(absolute)) {
+            return null;
+        }
+        // .dlqq 目录（除缓存目录内容外）一律禁止访问
+        if (touchesDlqq(absolute)) {
+            return "✗ 禁止访问 .dlqq 目录（仅当前会话缓存目录内容允许读写）: " + absolute;
+        }
         switch (getPermission()) {
+            case PERMISSION_CHAT:
+                return "✗ 当前为对话模式（chat），禁止任何资源操作: " + absolute
+                        + "\n可用 dlqq_workspace_permission_set 提权后再试";
             case PERMISSION_READONLY:
                 return "✗ 当前工作区为只读模式（readonly），禁止修改文件: " + absolute
                         + "\n可用 dlqq_workspace_permission_set 切换为 workspace、approval 或 full";
@@ -222,16 +236,15 @@ public final class Workspace {
     }
 
     /**
-     * 设置当前会话工作区的修改权限，并持久化到该工作区的 settings.properties
-     * （UTF-8，保留其它配置与注释）。
+     * 设置当前工作区的资源权限，并持久化到全局 settings。
      *
-     * @param mode readonly / workspace / approval / full
+     * @param mode chat / readonly / workspace / approval / highrisk / full / custom
      * @throws IllegalArgumentException 模式非法或写入配置失败
      */
     public static void setPermission(String mode) {
         String normalized = normalizePermission(mode);
         if (normalized == null) {
-            throw new IllegalArgumentException("权限模式必须是 readonly、workspace、approval 或 full: " + mode);
+            throw new IllegalArgumentException("资源权限必须是 chat、readonly、workspace、approval、highrisk 或 full: " + mode);
         }
         try {
             writeSettingsValue(getSettingsFile(), PERMISSION_KEY, normalized);
@@ -242,16 +255,18 @@ public final class Workspace {
         SessionScope.setCurrentPermission(normalized);
     }
 
-    /** 当前会话的操作权限：readonly / approval / highrisk / full（缺省 approval）。 */
+    /** 当前会话的操作权限：chat / readonly / approval / highrisk / full（缺省 chat）。 */
     public static String getOperationPermission() {
         String value = getSettingValue(OPERATION_PERMISSION_KEY);
-        String normalized = normalizePermission(value);
-        return normalized == null ? PERMISSION_APPROVAL : normalized;
+        String normalized = normalizeOperationPermission(value);
+        return normalized == null ? DEFAULT_OPERATION_PERMISSION : normalized;
     }
 
     /** 操作权限的中文说明。 */
     public static String getOperationPermissionLabel() {
         switch (getOperationPermission()) {
+            case PERMISSION_CHAT:
+                return "对话模式（chat）";
             case PERMISSION_READONLY:
                 return "只读（readonly）";
             case PERMISSION_FULL:
@@ -264,31 +279,31 @@ public final class Workspace {
     }
 
     /**
-     * 读取指定工作区目录配置的资源权限（用于工作区切换时的提权判断）。
+     * 读取指定工作区配置的资源权限（用于工作区切换时的提权判断）。
      *
      * @param root 目标工作区根目录
-     * @return 资源权限；未配置时为默认值 approval
+     * @return 资源权限；未配置时为默认值 chat
      */
     public static String getPermissionOf(Path root) {
         if (root == null) {
-            return PERMISSION_APPROVAL;
+            return DEFAULT_PERMISSION;
         }
-        Path settingsFile = root.resolve(SETTINGS_RELATIVE_PATH).normalize();
+        Path settingsFile = settingsFileOf(root);
         String value = readSettingsValue(settingsFile, PERMISSION_KEY);
         String normalized = normalizePermission(value);
-        return normalized == null ? PERMISSION_APPROVAL : normalized;
+        return normalized == null ? DEFAULT_PERMISSION : normalized;
     }
 
     /**
      * 设置当前会话的操作权限并持久化。
      *
-     * @param mode readonly / approval / highrisk / full
+     * @param mode chat / readonly / approval / highrisk / full
      * @throws IllegalArgumentException 模式非法或写入失败
      */
     public static void setOperationPermission(String mode) {
         String normalized = normalizeOperationPermission(mode);
         if (normalized == null) {
-            throw new IllegalArgumentException("操作权限必须是 readonly、approval、highrisk 或 full: " + mode);
+            throw new IllegalArgumentException("操作权限必须是 chat、readonly、approval、highrisk 或 full: " + mode);
         }
         try {
             writeSettingsValue(getSettingsFile(), OPERATION_PERMISSION_KEY, normalized);
@@ -302,10 +317,11 @@ public final class Workspace {
             return null;
         }
         switch (mode.trim().toLowerCase()) {
-            case "readonly":
-            case "approval":
+            case PERMISSION_CHAT:
+            case PERMISSION_READONLY:
+            case PERMISSION_APPROVAL:
             case "highrisk":
-            case "full":
+            case PERMISSION_FULL:
                 return mode.trim().toLowerCase();
             default:
                 return null;
@@ -317,8 +333,8 @@ public final class Workspace {
         if (!Files.isRegularFile(settingsFile)) {
             return;
         }
-        java.util.List<String> lines = Files.readAllLines(settingsFile, StandardCharsets.UTF_8);
-        java.util.List<String> kept = new java.util.ArrayList<>(lines.size());
+        List<String> lines = Files.readAllLines(settingsFile, StandardCharsets.UTF_8);
+        List<String> kept = new ArrayList<>(lines.size());
         boolean changed = false;
         for (String line : lines) {
             String trimmed = line.trim();
@@ -358,7 +374,7 @@ public final class Workspace {
         return SessionScope.getWorkspaceMetaKey();
     }
 
-    /** 读取当前会话工作区配置值；文件或键不存在时返回 null。 */
+    /** 读取当前工作区配置值；文件或键不存在时返回 null。 */
     public static String getSettingValue(String key) {
         return readSettingsValue(getSettingsFile(), key);
     }
@@ -419,14 +435,31 @@ public final class Workspace {
         }
         String value = mode.trim().toLowerCase();
         switch (value) {
+            case PERMISSION_CHAT:
             case PERMISSION_READONLY:
             case PERMISSION_WORKSPACE:
             case PERMISSION_APPROVAL:
+            case "highrisk":
             case PERMISSION_FULL:
+            case "custom":
                 return value;
             default:
                 return null;
         }
+    }
+
+    /** 路径是否包含名为 .dlqq 的路径段。 */
+    public static boolean touchesDlqq(Path path) {
+        if (path == null) {
+            return false;
+        }
+        Path absolute = path.toAbsolutePath().normalize();
+        for (Path segment : absolute) {
+            if (RuntimeDirs.DLQQ_DIR_NAME.equalsIgnoreCase(segment.toString())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static Path toExistingDirectory(String value) {
@@ -445,6 +478,16 @@ public final class Workspace {
             return path;
         } catch (RuntimeException e) {
             return null;
+        }
+    }
+
+    /** 路径是否严格位于当前会话缓存目录内部（缓存目录节点本身不算）。 */
+    private static boolean isCacheContent(Path absolute) {
+        try {
+            Path cacheDir = SessionScope.currentCacheDir().toAbsolutePath().normalize();
+            return absolute.startsWith(cacheDir) && !absolute.equals(cacheDir);
+        } catch (RuntimeException e) {
+            return false;
         }
     }
 

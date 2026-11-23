@@ -1,5 +1,6 @@
 package com.donglouqiaoque.dlqqmcpserver.mcp.policy;
 
+import com.donglouqiaoque.dlqqmcpserver.utils.SessionScope;
 import com.donglouqiaoque.dlqqmcpserver.utils.Workspace;
 
 import java.io.BufferedReader;
@@ -7,8 +8,11 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 工具权限策略。
@@ -36,6 +40,28 @@ public final class ToolPolicy {
     private static final String LEGACY_OPERATION_LEVEL_KEY = "permission.peripheral.level";
     private static final String LEGACY_WRITE_MODE_KEY = "workspace.write.mode";
     private static final String CUSTOM_PREFIX = "tool.policy.";
+    /** .dlqq 目录拒绝消息（读与写都拒绝，cache 会话目录除外）。 */
+    private static final String DLQQ_DENY_MESSAGE =
+            "禁止访问 .dlqq 目录（配置/日志/缓存/数据由服务端管理，任何权限等级均不可读写；仅当前会话缓存目录内容除外）";
+    /** 服务端内部执行的例外工具：不受 .dlqq 文件访问规则限制。 */
+    private static final Set<String> MANAGEMENT_TOOLS = Set.of(
+            "dlqq_clear_mcp_cache",
+            "dlqq_clear_mcp_log",
+            "dlqq_clear_mcp_data",
+            "dlqq_get_mcp_properties",
+            "dlqq_set_mcp_properties",
+            "dlqq_reset_mcp_properties",
+            "dlqq_workspace_set",
+            "dlqq_workspace_get",
+            "dlqq_workspace_reset",
+            "dlqq_workspace_permission_set",
+            "dlqq_get_mcp_version",
+            "dlqq_get_cwd_path",
+            "dlqq_get_tool_list",
+            "dlqq_get_tools_env",
+            "dlqq_clear_command_list",
+            "dlqq_clear_powershell_list",
+            "dlqq_clear_pwsh_list");
 
     private static final Map<String, Risk[]> RISKS = new HashMap<>();
     private static final Map<String, Boolean> HIDDEN = new HashMap<>();
@@ -70,9 +96,12 @@ public final class ToolPolicy {
             }
         }
         Risk[] risk = RISKS.getOrDefault(toolName, new Risk[] {Risk.SAFE, Risk.SAFE});
-        // .dlqq 目录（配置、日志、缓存、脚本）一律禁止 AI 修改，与权限等级无关
-        if (risk[0] != Risk.SAFE && touchesDlqq(arguments)) {
-            return Result.deny("禁止修改 .dlqq 目录内的文件（配置、日志、缓存由服务端管理，任何权限等级均不可修改）");
+        // .dlqq 目录（配置/日志/缓存/数据）对 AI 一律封闭；仅当前会话缓存目录内的内容允许读写
+        if (!MANAGEMENT_TOOLS.contains(toolName)) {
+            Result dlqq = decideDlqqAccess(arguments);
+            if (dlqq != null) {
+                return dlqq;
+            }
         }
         boolean inside = isInsideWorkspace(arguments);
 
@@ -110,33 +139,78 @@ public final class ToolPolicy {
     }
 
     /** 参数中是否包含 .dlqq 路径段。 */
-    @SuppressWarnings("unchecked")
-    private static boolean touchesDlqq(Map<String, Object> arguments) {
-        if (arguments == null) {
-            return false;
+    /**
+     * 判定本次调用涉及的 .dlqq 路径：没有任何 .dlqq 路径时返回 null（继续常规权限判定）；
+     * 全部位于当前会话缓存目录内容内时直接允许；其余情况拒绝。
+     */
+    private static Result decideDlqqAccess(Map<String, Object> arguments) {
+        List<Path> touched = new ArrayList<>();
+        collectTouchedPaths(arguments, touched);
+        boolean anyDlqq = false;
+        Path cacheDir = currentCacheDirOrNull();
+        for (Path path : touched) {
+            if (!Workspace.touchesDlqq(path)) {
+                continue;
+            }
+            anyDlqq = true;
+            if (cacheDir == null) {
+                return Result.deny(DLQQ_DENY_MESSAGE);
+            }
+            Path normalized = path.toAbsolutePath().normalize();
+            if (normalized.equals(cacheDir) || cacheDir.startsWith(normalized)) {
+                return Result.deny("禁止修改缓存目录节点（只能读写当前会话缓存目录内的内容）");
+            }
+            if (!normalized.startsWith(cacheDir)) {
+                return Result.deny(DLQQ_DENY_MESSAGE);
+            }
         }
-        // dlqq_mcp_run_tools 等嵌套调用：继续检查内层 arguments
+        if (!anyDlqq) {
+            return null;
+        }
+        for (Path path : touched) {
+            if (!path.toAbsolutePath().normalize().startsWith(cacheDir)) {
+                // 混合路径（如缓存目录内文件移动到工作区）：交由常规权限判定
+                return null;
+            }
+        }
+        return Result.allow();
+    }
+
+    /** 收集参数中出现的路径（含 dlqq_mcp_run_tools 的嵌套 arguments）。 */
+    @SuppressWarnings("unchecked")
+    private static void collectTouchedPaths(Map<String, Object> arguments, List<Path> out) {
+        if (arguments == null) {
+            return;
+        }
         Object nested = arguments.get("arguments");
-        if (nested instanceof Map<?, ?> nestedMap && touchesDlqq((Map<String, Object>) nestedMap)) {
-            return true;
+        if (nested instanceof Map<?, ?> nestedMap) {
+            collectTouchedPaths((Map<String, Object>) nestedMap, out);
         }
         for (String key : new String[] {"path", "file_path", "dir_path", "search_path",
-                "source_path", "target_path", "new_path", "old_path"}) {
+                "source_path", "target_path", "new_path", "old_path", "output_path", "output_dir"}) {
             Object value = arguments.get(key);
             if (value == null) {
                 continue;
             }
-            String text = String.valueOf(value).trim().replace('\\', '/');
+            String text = String.valueOf(value).trim();
             if (text.isEmpty()) {
                 continue;
             }
-            for (String segment : text.split("/")) {
-                if (".dlqq".equalsIgnoreCase(segment.trim())) {
-                    return true;
-                }
+            try {
+                out.add(Workspace.resolve(text));
+            } catch (RuntimeException ignored) {
+                // 非法路径交由工具自身校验
             }
         }
-        return false;
+    }
+
+    /** 当前会话缓存目录；未初始化或异常时返回 null（按拒绝处理）。 */
+    private static Path currentCacheDirOrNull() {
+        try {
+            return SessionScope.currentCacheDir().toAbsolutePath().normalize();
+        } catch (RuntimeException e) {
+            return null;
+        }
     }
 
     private static String riskLabel(Risk risk) {

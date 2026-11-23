@@ -4,6 +4,7 @@ import com.donglouqiaoque.dlqqmcpserver.mcp.protocol.McpSchema.CallToolResult;
 import com.donglouqiaoque.dlqqmcpserver.mcp.protocol.McpSchema.ToolContent;
 import com.donglouqiaoque.dlqqmcpserver.mcp.protocol.McpSchema.ToolInputSchema;
 import com.donglouqiaoque.dlqqmcpserver.mcp.server.McpServer;
+import com.donglouqiaoque.dlqqmcpserver.utils.SessionScope;
 import com.donglouqiaoque.dlqqmcpserver.utils.Workspace;
 
 import org.apache.batik.transcoder.TranscoderException;
@@ -75,7 +76,7 @@ public class ImageTools {
 
         Map<String, Object> outProp = new HashMap<>();
         outProp.put("type", "string");
-        outProp.put("description", "输出文件路径（可选，默认保存到 .dlqq/cache 目录下带时间戳的文件）");
+        outProp.put("description", "输出文件路径（可选，默认保存到 .dlqq/cache/<工作区>/<会话> 目录下带时间戳的文件）");
         properties.put("output_path", outProp);
 
         Map<String, Object> qualityProp = new HashMap<>();
@@ -226,7 +227,7 @@ public class ImageTools {
             }
             return p;
         }
-        Path cache = Workspace.getRoot().resolve(".dlqq/cache");
+        Path cache = SessionScope.currentCacheDir();
         Files.createDirectories(cache);
         String base = src.getFileName().toString();
         int dot = base.lastIndexOf('.');

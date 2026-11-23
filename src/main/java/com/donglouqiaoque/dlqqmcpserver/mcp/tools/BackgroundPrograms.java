@@ -2,6 +2,7 @@ package com.donglouqiaoque.dlqqmcpserver.mcp.tools;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.donglouqiaoque.dlqqmcpserver.utils.SessionScope;
 import com.donglouqiaoque.dlqqmcpserver.utils.Workspace;
 
 import java.io.BufferedReader;
@@ -73,8 +74,7 @@ final class BackgroundPrograms {
     }
 
     private static File baseDir() {
-        File dir = new File(Workspace.getRoot().toFile(),
-            ".dlqq" + File.separator + "cache" + File.separator + "background_programs");
+        File dir = SessionScope.currentCacheDir().resolve("background_programs").toFile();
         if (!dir.exists()) {
             dir.mkdirs();
         }

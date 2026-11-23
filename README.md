@@ -2823,21 +2823,25 @@ settings.json
 | `permission.operation.level` | **操作权限**：鼠标、键盘、屏幕、串口、BLE、WiFi、USB 等外设操作 |
 | `tool.policy.<工具名>` | 自定义权限时的逐工具覆盖（allow / approve / deny） |
 
-**资源权限**默认 `approval`（工作区外需要审批），可选值：
+**资源权限**默认 `chat`（对话模式：禁止任何资源操作），可选值：
 `chat` < `readonly` < `workspace` < `approval` < `highrisk` < `full` < `custom`。
 
-**操作权限**默认 `approval`（需要批准），可选值：
-`readonly` < `approval` < `highrisk` < `full` < `custom`。
+**操作权限**默认 `chat`（对话模式：禁止任何外设操作），可选值：
+`chat` < `readonly` < `approval` < `highrisk` < `full` < `custom`。
 
-- 旧的 `workspace.write.mode` 已废弃：不再读取，写入新键时会自动从配置文件删除；
-- `.dlqq` 目录（配置/日志/缓存/脚本）**任何权限等级下都禁止 AI 修改**；
+- 新工作区（含进程 CWD、`default_workspace`）首次使用即写入默认 `chat`，需要先用权限工具提权；
+- 同一工作区的多个会话共用一份 settings；切换工作区 = 切换 settings 与权限；
+- 旧的 `workspace.write.mode` 已废弃：不再读取，写入新键时会自动清理；
+- `.dlqq` 目录（配置/日志/缓存/数据）**任何权限等级下都禁止 AI 读写**，
+  仅当前会话缓存目录（`.dlqq/cache/<工作区hash>/<会话hash>/`）内的内容允许读写；
 - 权限只能通过 `dlqq_workspace_permission_set` 修改（`dlqq_set_mcp_properties` 拒绝权限类键名）。
 
 ### 工作区切换
 
 - `dlqq_workspace_set` / `dlqq_workspace_reset` 在**任意权限等级下都可调用**；
 - 目标工作区与当前一致 → 直接返回"无需修改"，不弹窗口；
-- 切换/重置工作区**始终需要用户审批**，审批窗口带倒计时。
+- 切换/重置工作区**始终需要用户审批**，审批窗口带倒计时；
+- 设置失败（不存在/非目录/位于 `.dlqq` 下）→ **拒绝并保持当前工作区**，不回退。
 
 ### 权限提升
 
@@ -2852,6 +2856,32 @@ settings.json
 - 后台进程类调用（`no_wait=true`）立即返回，不受总超时限制；
 - 超时处理：**立即关闭审批窗口、中断工具执行并返回明确错误**；
 - 所有审批窗口的倒计时 = 工具总超时的剩余时间，超时自动关闭并返回"用户未批准"。
+
+## 运行时目录（全局 .dlqq）
+
+所有运行时数据集中放在**与 jar 同级的唯一目录**，不再往各个工作区写 `.dlqq`：
+
+```text
+<部署目录>/
+├── dlqq_mcp_server.jar
+├── default_workspace/                 # 兜底工作区（工作区不可用时使用）
+└── .dlqq/
+    ├── workspace_config.json          # 工作区绝对路径 → hash 映射
+    ├── cache/<工作区hash>/<会话hash>/  # 缓存（按工作区 + 会话两级）
+    ├── data/                          # 全局共享数据（BLE 脚本、图标等）
+    ├── log/stdio/<启动时间>.log        # 日志按传输方式 + 启动时间
+    ├── log/http/<启动时间>.log
+    └── settings/<工作区hash>/settings.properties
+```
+
+- **工作区解析**：会话 `_meta` 下发的工作区 → `--workspace` → 进程 CWD；需要回退时统一回退
+  `default_workspace`（CWD 只作默认值，不承担回退职责）；
+- **工作区标识**：规范化绝对路径（小写不敏感）取 SHA-256 前缀作为目录 hash（8~32 位，冲突加长）；
+- **启动失败**：`.dlqq` 或 `default_workspace` 无法创建/不可写时直接启动失败（弹窗 + stderr + 退出码），
+  不回退用户目录；
+- **日志**：每次进程启动新建一个文件，logger 与 stderr 合并写入，同名冲突追加 `-2`/`-3`；
+- **清理工具**：`dlqq_clear_mcp_cache` 支持 `workspace`/`all` 参数；`dlqq_clear_mcp_data` 只清
+  cache/data/log，**不删除 settings**（权限配置受保护）。
 
 ## 单进程多会话（会话隔离）
 

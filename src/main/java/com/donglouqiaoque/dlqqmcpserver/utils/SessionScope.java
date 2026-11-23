@@ -1,7 +1,11 @@
 package com.donglouqiaoque.dlqqmcpserver.utils;
 
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
@@ -10,12 +14,13 @@ import org.slf4j.LoggerFactory;
 /**
  * 会话作用域：让同一个 MCP 服务进程同时服务多个对话会话。
  *
- * <p>会话标识由客户端通过 {@code params._meta[<metaKey>]} 提供（stdio 与 HTTP 通用），
- * HTTP 模式在缺少 {@code _meta} 时回退到 {@code Mcp-Session-Id} 请求头。
+ * <p>会话标识由客户端通过 {@code params._meta[<metaKey>]} 提供（stdio 与 HTTP 通用）。
  * 没有会话标识的请求落到默认会话（进程级），保持与旧客户端兼容。</p>
  *
- * <p>每个会话持有独立的工作区根目录、来源与修改权限；请求线程通过 ThreadLocal
- * 绑定当前会话，工作区与配置访问自动路由到对应会话。</p>
+ * <p>每个会话持有独立的工作区根目录、来源与权限；请求线程通过 ThreadLocal
+ * 绑定当前会话。工作区默认取进程 CWD，不可用时回退兜底工作区
+ * {@code <部署目录>/default_workspace}；每个工作区的配置存放在全局运行时目录
+ * {@code <部署目录>/.dlqq/settings/<工作区hash>/settings.properties}。</p>
  */
 public final class SessionScope {
 
@@ -42,14 +47,18 @@ public final class SessionScope {
     /** 工作区来源常量（与 Workspace 的公开常量保持一致）。 */
     private static final String SOURCE_CWD = "process working directory";
     private static final String SOURCE_CLI = "--workspace argument";
+    private static final String SOURCE_DEFAULT = "default workspace";
+    /** 工作区来源：由客户端 _meta 下发的会话 cwd 初始化。 */
+    private static final String SOURCE_HINT = "session cwd (params._meta)";
 
     private static final String DEFAULT_AGENT_META_KEY = "dsh/agentId";
     /** 会话工作区目录的 _meta 键（客户端携带会话 cwd，用于会话初始化工作区）。 */
     private static final String DEFAULT_WORKSPACE_META_KEY = "dsh/workspace";
     /** 复合会话键最大长度（会话键 + Agent 键）。 */
     private static final int MAX_COMPOSITE_KEY_LENGTH = 512;
-    /** 工作区来源：由客户端 _meta 下发的会话 cwd 初始化。 */
-    private static final String SOURCE_HINT = "session cwd (params._meta)";
+    /** 缓存目录名使用的会话 hash 长度。 */
+    private static final int SESSION_HASH_LENGTH = 16;
+    private static final String HASH_ALGORITHM = "SHA-256";
 
     private static volatile String metaKey = DEFAULT_META_KEY;
     private static volatile String agentMetaKey = DEFAULT_AGENT_META_KEY;
@@ -64,19 +73,29 @@ public final class SessionScope {
     }
 
     /**
-     * 初始化默认基准工作区（启动时调用一次）：优先 --workspace，否则进程 CWD。
+     * 初始化默认基准工作区（启动时调用一次）：优先 --workspace，否则进程 CWD；
+     * 两者都不可用（不存在/不是目录/位于 .dlqq 下）时回退兜底工作区。
      *
      * @param cliWorkspace 启动参数 --workspace 的值，可为 null
      */
     public static synchronized void init(String cliWorkspace) {
+        RuntimeDirs.init();
         baseCliPath = isBlank(cliWorkspace) ? null : cliWorkspace.trim();
-        Path cliDir = toExistingDirectory(baseCliPath);
+        Path cliDir = toUsableWorkspace(baseCliPath);
         if (cliDir != null) {
             baseRoot = cliDir;
             baseSource = SOURCE_CLI;
         } else {
-            baseRoot = normalizeCwd();
-            baseSource = SOURCE_CWD;
+            Path cwd = normalizeCwd();
+            if (isUsableWorkspace(cwd)) {
+                baseRoot = cwd;
+                baseSource = SOURCE_CWD;
+            } else {
+                baseRoot = RuntimeDirs.getDefaultWorkspace();
+                baseSource = SOURCE_DEFAULT;
+                logger.warn("[SessionScope] Process CWD is not usable as workspace, fallback to default workspace: {}",
+                        baseRoot);
+            }
         }
         SESSIONS.clear();
         getSession(DEFAULT_SESSION_ID);
@@ -163,31 +182,46 @@ public final class SessionScope {
     }
 
     /**
-     * 会话首次被访问时，用客户端 {@code _meta[workspaceMetaKey]} 下发的绝对目录初始化工作区。
-     * 每个会话只尝试一次；路径非法/不存在时静默回退到基准工作区。
+     * 会话首次被访问时应用客户端 {@code _meta[workspaceMetaKey]} 下发的工作区：
+     * 合法目录直接使用；缺失/非法/位于 .dlqq 下时回退兜底工作区。每个会话只尝试一次。
      */
-    @SuppressWarnings("unchecked")
     private static void applyWorkspaceHint(Map<String, Object> params) {
         Session session = currentSession();
         if (session.workspaceHintApplied) {
             return;
         }
         session.workspaceHintApplied = true;
-        Path hint = resolveWorkspaceHint(params);
-        if (hint == null || hint.equals(session.root)) {
+        String hintText = readWorkspaceHint(params);
+        if (hintText == null) {
             return;
         }
-        session.root = hint;
-        session.source = SOURCE_HINT;
+        Path hint = toUsableWorkspace(hintText);
+        Path target;
+        String source;
+        if (hint != null) {
+            target = hint;
+            source = SOURCE_HINT;
+        } else {
+            target = RuntimeDirs.getDefaultWorkspace();
+            source = SOURCE_DEFAULT;
+            logger.warn("[SessionScope] Session workspace hint rejected, fallback to default workspace: {} (hint: {})",
+                    target, hintText);
+        }
+        if (target.equals(session.root)) {
+            session.source = source;
+            return;
+        }
+        session.root = target;
+        session.source = source;
         session.ensuredRoot = null;
-        session.permission = loadPermission(hint);
-        logger.info("[SessionScope] Session workspace initialized from _meta: {} (source: {}, session: {})",
-                hint, SOURCE_HINT, session.id);
+        session.permission = loadPermission(target);
+        logger.info("[SessionScope] Session workspace initialized: {} (source: {}, session: {})",
+                target, source, session.id);
     }
 
-    /** 从 params._meta 中解析并校验会话工作区目录；非法时返回 null。 */
+    /** 读取 props._meta 中的工作区字符串；没有下发时返回 null。 */
     @SuppressWarnings("unchecked")
-    private static Path resolveWorkspaceHint(Map<String, Object> params) {
+    private static String readWorkspaceHint(Map<String, Object> params) {
         if (params == null || isBlank(workspaceMetaKey)) {
             return null;
         }
@@ -200,32 +234,7 @@ public final class SessionScope {
             return null;
         }
         String text = String.valueOf(value).trim();
-        if (text.isEmpty()) {
-            return null;
-        }
-        // .dlqq 目录（配置/日志/缓存/脚本）不允许作为工作区
-        for (String segment : text.replace('\\', '/').split("/")) {
-            if (".dlqq".equalsIgnoreCase(segment.trim())) {
-                logger.warn("[SessionScope] Reject session workspace hint under .dlqq: {}", text);
-                return null;
-            }
-        }
-        try {
-            Path path = Paths.get(text);
-            if (!path.isAbsolute()) {
-                logger.warn("[SessionScope] Reject non-absolute session workspace hint: {}", text);
-                return null;
-            }
-            path = path.normalize();
-            if (!java.nio.file.Files.isDirectory(path)) {
-                logger.warn("[SessionScope] Session workspace hint is not a directory: {}", text);
-                return null;
-            }
-            return path;
-        } catch (RuntimeException e) {
-            logger.warn("[SessionScope] Invalid session workspace hint: {} ({})", text, e.getMessage());
-            return null;
-        }
+        return text.isEmpty() ? null : text;
     }
 
     /** 当前会话工作区 {@code _meta} 键名。 */
@@ -249,8 +258,7 @@ public final class SessionScope {
     /**
      * 从 JSON-RPC params 中解析会话键：读取 {@code params._meta} 中的会话键与 Agent 键。
      *
-     * <p>两个键都提供时组成复合键，实现「多个对话 × 多个 Agent」的二维隔离；
-     * 只提供会话键时按会话隔离；都没有时返回 null（落到默认会话，兼容不支持多会话的客户端）。</p>
+     * <p>两个键都提供时组成复合键，实现「多个对话 × 多个 Agent」的二维隔离；</p>
      *
      * @param params 请求参数（可为 null）
      * @return 会话键，未提供任何标识时返回 null
@@ -332,9 +340,26 @@ public final class SessionScope {
         return baseCliPath;
     }
 
-    /** 当前会话的修改权限。 */
+    /** 当前会话的资源权限。 */
     public static String currentPermission() {
         return currentSession().permission;
+    }
+
+    /** 当前会话工作区对应的目录 hash（用于全局 cache/settings 目录名）。 */
+    public static String currentWorkspaceHash() {
+        return WorkspaceRegistry.hashFor(currentRoot());
+    }
+
+    /** 当前会话的会话 hash（用于 cache 第二级目录名）。 */
+    public static String currentSessionHash() {
+        return sha256Hex(currentSessionId()).substring(0, SESSION_HASH_LENGTH);
+    }
+
+    /** 当前会话的缓存目录：{@code <部署>/.dlqq/cache/<工作区hash>/<会话hash>}。 */
+    public static Path currentCacheDir() {
+        return RuntimeDirs.getCacheRoot()
+                .resolve(currentWorkspaceHash())
+                .resolve(currentSessionHash());
     }
 
     /** 修改当前会话的工作区根目录，并按新工作区重新加载权限。 */
@@ -346,7 +371,7 @@ public final class SessionScope {
         session.permission = loadPermission(root);
     }
 
-    /** 把当前会话回退到启动基准工作区。 */
+    /** 把当前会话重置到启动默认工作区。 */
     public static void resetCurrentToDefault() {
         Session session = currentSession();
         session.root = baseRoot;
@@ -355,17 +380,17 @@ public final class SessionScope {
         session.permission = loadPermission(baseRoot);
     }
 
-    /** 设置当前会话的修改权限（调用方负责持久化）。 */
+    /** 设置当前会话的资源权限（调用方负责持久化）。 */
     public static void setCurrentPermission(String permission) {
         currentSession().permission = permission;
     }
 
-    /** 当前会话已确保过 .dlqq 元数据的工作区路径（避免重复磁盘检查）。 */
+    /** 当前会话已确保过元数据的工作区路径（保留字段，兼容旧逻辑）。 */
     public static String currentEnsuredRoot() {
         return currentSession().ensuredRoot;
     }
 
-    /** 记录当前会话已确保 .dlqq 元数据的工作区路径。 */
+    /** 记录当前会话已确保过元数据的工作区路径（保留字段，兼容旧逻辑）。 */
     public static void setCurrentEnsuredRoot(String path) {
         currentSession().ensuredRoot = path;
     }
@@ -419,16 +444,15 @@ public final class SessionScope {
         return session;
     }
 
+    /** 读取工作区资源权限；配置不存在时创建默认 settings（chat）并按默认值返回。 */
     private static String loadPermission(Path root) {
-        // 默认权限：工作区外需要审批（approval）
-        String fallback = Workspace.PERMISSION_APPROVAL;
         if (root == null) {
-            return fallback;
+            return Workspace.DEFAULT_PERMISSION;
         }
-        Path settingsFile = root.resolve(Workspace.SETTINGS_RELATIVE_PATH).normalize();
-        String value = Workspace.readSettingsValue(settingsFile, Workspace.PERMISSION_KEY);
+        Workspace.ensureSettingsFileFor(root);
+        String value = Workspace.readSettingsValue(Workspace.settingsFileOf(root), Workspace.PERMISSION_KEY);
         String normalized = Workspace.normalizePermission(value);
-        return normalized == null ? fallback : normalized;
+        return normalized == null ? Workspace.DEFAULT_PERMISSION : normalized;
     }
 
     private static String normalizeSessionId(String sessionId) {
@@ -446,7 +470,12 @@ public final class SessionScope {
         return Paths.get(System.getProperty("user.dir")).toAbsolutePath().normalize();
     }
 
-    private static Path toExistingDirectory(String value) {
+    /** 工作区是否可用：存在、是目录、且不位于 .dlqq 下。 */
+    private static boolean isUsableWorkspace(Path path) {
+        return path != null && Files.isDirectory(path) && !Workspace.touchesDlqq(path);
+    }
+
+    private static Path toUsableWorkspace(String value) {
         if (isBlank(value)) {
             return null;
         }
@@ -456,9 +485,24 @@ public final class SessionScope {
                 return null;
             }
             path = path.normalize();
-            return java.nio.file.Files.isDirectory(path) ? path : null;
+            return isUsableWorkspace(path) ? path : null;
         } catch (RuntimeException e) {
             return null;
+        }
+    }
+
+    private static String sha256Hex(String text) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance(HASH_ALGORITHM);
+            byte[] bytes = digest.digest(text.getBytes(StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder(bytes.length * 2);
+            for (byte value : bytes) {
+                hex.append(Character.forDigit((value >> 4) & 0xF, 16));
+                hex.append(Character.forDigit(value & 0xF, 16));
+            }
+            return hex.toString();
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("JVM 不支持 " + HASH_ALGORITHM, e);
         }
     }
 

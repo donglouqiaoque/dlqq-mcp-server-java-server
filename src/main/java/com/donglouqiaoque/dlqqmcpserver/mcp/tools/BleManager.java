@@ -8,6 +8,7 @@ import java.nio.file.*;
 import java.util.*;
 import java.util.List;
 import java.util.concurrent.*;
+import com.donglouqiaoque.dlqqmcpserver.utils.RuntimeDirs;
 import com.donglouqiaoque.dlqqmcpserver.utils.Workspace;
 
 import com.google.gson.Gson;
@@ -419,48 +420,22 @@ public class BleManager {
     }
 
     /**
-     * 从JAR提取Python脚本到.dlqq/script/python目录
-     * 如果.dlqq/script/python目录中已有脚本，优先使用已存在的脚本
+     * 从 JAR 提取 Python 脚本到全局 {@code .dlqq/data/script/python} 目录；
+     * 若脚本已存在则优先使用已存在的版本。
      */
     private File extractPythonScript() {
         try {
-            // 获取工作目录
-            Path workDir = Workspace.getRoot();
+            Path pythonDir = RuntimeDirs.getDataRoot().resolve("script").resolve("python");
+            File scriptFile = pythonDir.resolve("ble_service.py").toFile();
 
-            // 优先使用 .dlqq/script/python 目录
-            Path dlqqPythonDir = workDir.resolve(".dlqq").resolve("script").resolve("python");
-            File scriptFile = dlqqPythonDir.resolve("ble_service.py").toFile();
-
-            // 检查 .dlqq/script/python/ble_service.py 是否已存在
             if (Files.exists(scriptFile.toPath())) {
                 System.err.println(getInstanceId() + " 使用已存在的Python脚本: " + scriptFile.getAbsolutePath());
                 return scriptFile;
             }
 
-            // 不存在则提取到 .dlqq/script/python 目录
-            Path pythonDir = dlqqPythonDir;
-
             // 确保目录存在
             if (!Files.exists(pythonDir)) {
                 Files.createDirectories(pythonDir);
-            }
-
-            // 创建 .dlqq/.gitignore 文件，忽略该目录下的所有内容
-            Path dlqqDir = workDir.resolve(".dlqq");
-            Path gitignorePath = dlqqDir.resolve(".gitignore");
-            if (!Files.exists(gitignorePath)) {
-                Files.write(gitignorePath, "*\n".getBytes(StandardCharsets.UTF_8));
-            }
-
-            // 尝试将 .dlqq 目录设置为隐藏（Windows），失败则忽略
-            try {
-                DosFileAttributeView dosView = Files.getFileAttributeView(
-                        dlqqDir, DosFileAttributeView.class);
-                if (dosView != null) {
-                    dosView.setHidden(true);
-                }
-            } catch (Exception ignored) {
-                // 设置隐藏失败，忽略
             }
 
             try (InputStream is = getClass().getResourceAsStream(SCRIPT_RESOURCE_PATH)) {

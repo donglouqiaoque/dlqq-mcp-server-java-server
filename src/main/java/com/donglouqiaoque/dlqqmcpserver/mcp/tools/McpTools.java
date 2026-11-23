@@ -14,7 +14,10 @@ import java.util.jar.*;
 import java.util.stream.Stream;
 import com.donglouqiaoque.dlqqmcpserver.BuildInfo;
 import java.net.URLDecoder;
+import com.donglouqiaoque.dlqqmcpserver.utils.RuntimeDirs;
+import com.donglouqiaoque.dlqqmcpserver.utils.SessionScope;
 import com.donglouqiaoque.dlqqmcpserver.utils.Workspace;
+import com.donglouqiaoque.dlqqmcpserver.utils.WorkspaceRegistry;
 import java.time.format.DateTimeFormatter;
 import java.time.LocalDateTime;
 import java.time.ZonedDateTime;
@@ -186,152 +189,42 @@ public class McpTools {
     }
 
     /**
-     * 清除.dlqq数据目录
-     * 删除整个.dlqq目录及其所有内容
-     * @return 删除结果描述（始终返回成功，即使部分文件被占用）
+     * 清除运行时数据（cache / data / log），保留 settings 与 workspace_config.json。
+     * 权限配置属于关键设置，任何清理工具都不得删除。
+     *
+     * @return 删除结果描述
      */
     public static String clearDlqqData() {
-        Path dlqqPath = Workspace.getRoot().resolve(".dlqq");
-
-        if (!Files.exists(dlqqPath)) {
-            return ".dlqq目录不存在，无需清除";
-        }
-
-        if (!Files.isDirectory(dlqqPath)) {
-            return "✗ 清除失败：.dlqq路径不是目录";
-        }
-
         StringBuilder result = new StringBuilder();
-        List<String> deletedItems = new ArrayList<>();
-        List<String> busyFiles = new ArrayList<>();
-
-        // 先尝试删除日志目录（因为这是最可能被占用的）
-        Path logPath = dlqqPath.resolve("log");
-        if (Files.exists(logPath)) {
-            // 尝试删除logger目录下的日志文件
-            Path loggerPath = logPath.resolve("logger");
-            if (Files.exists(loggerPath)) {
-                try (Stream<Path> stream = Files.list(loggerPath)) {
-                    for (Path file : stream.toList()) {
-                        if (Files.isRegularFile(file)) {
-                            try {
-                                Files.delete(file);
-                                deletedItems.add("log/logger/" + file.getFileName());
-                            } catch (IOException e) {
-                                busyFiles.add("log/logger/" + file.getFileName());
-                            }
-                        }
-                    }
-                } catch (IOException e) {
-                    // 忽略读取目录失败
-                }
-                // 尝试删除logger目录
-                try {
-                    Files.delete(loggerPath);
-                    deletedItems.add("log/logger");
-                } catch (IOException e) {
-                    // 目录可能不为空，继续
-                }
-            }
-
-            // 尝试删除stderr目录下的日志文件
-            Path stderrPath = logPath.resolve("stderr");
-            if (Files.exists(stderrPath)) {
-                try (Stream<Path> stream = Files.list(stderrPath)) {
-                    for (Path file : stream.toList()) {
-                        if (Files.isRegularFile(file)) {
-                            try {
-                                Files.delete(file);
-                                deletedItems.add("log/stderr/" + file.getFileName());
-                            } catch (IOException e) {
-                                busyFiles.add("log/stderr/" + file.getFileName());
-                            }
-                        }
-                    }
-                } catch (IOException e) {
-                    // 忽略读取目录失败
-                }
-                // 尝试删除stderr目录
-                try {
-                    Files.delete(stderrPath);
-                    deletedItems.add("log/stderr");
-                } catch (IOException e) {
-                    // 目录可能不为空，继续
-                }
-            }
-
-            // 尝试删除log目录
-            try {
-                Files.delete(logPath);
-                deletedItems.add("log");
-            } catch (IOException e) {
-                // 目录可能不为空，继续
-            }
-        }
-
-        // 尝试删除script/python目录
-        Path scriptPath = dlqqPath.resolve("script");
-        if (Files.exists(scriptPath)) {
-            List<String> scriptDeleted = new ArrayList<>();
-            List<String> scriptBusy = new ArrayList<>();
-            deleteDirectoryRecursiveCollect(scriptPath, ".dlqq/script", scriptDeleted, scriptBusy);
-            deletedItems.addAll(scriptDeleted);
-            busyFiles.addAll(scriptBusy);
-        }
-
-        // 尝试删除旧的python目录（向后兼容）
-        Path pythonPath = dlqqPath.resolve("python");
-        if (Files.exists(pythonPath)) {
-            List<String> pythonDeleted = new ArrayList<>();
-            List<String> pythonBusy = new ArrayList<>();
-            deleteDirectoryRecursiveCollect(pythonPath, ".dlqq/python", pythonDeleted, pythonBusy);
-            deletedItems.addAll(pythonDeleted);
-            busyFiles.addAll(pythonBusy);
-        }
-
-        // 尝试删除settings目录
-        Path settingsPath = dlqqPath.resolve("settings");
-        if (Files.exists(settingsPath)) {
-            List<String> settingsDeleted = new ArrayList<>();
-            List<String> settingsBusy = new ArrayList<>();
-            deleteDirectoryRecursiveCollect(settingsPath, ".dlqq/settings", settingsDeleted, settingsBusy);
-            deletedItems.addAll(settingsDeleted);
-            busyFiles.addAll(settingsBusy);
-        }
-
-        // 最后删除.dlqq目录本身
-        try {
-            Files.delete(dlqqPath);
-            deletedItems.add(".dlqq");
-        } catch (IOException e) {
-            // 如果目录不为空，继续
-        }
-
-        // 构建返回结果
-        result.append("✓ .dlqq数据目录清除完成\n");
+        result.append("✓ 运行时数据清除完成\n");
         result.append("===================\n\n");
-
-        if (!deletedItems.isEmpty()) {
-            result.append("已删除的项目（").append(deletedItems.size()).append("个）：\n");
-            for (String item : deletedItems) {
-                result.append("  ✓ ").append(item).append("\n");
-            }
-            result.append("\n");
-        }
-
-        if (!busyFiles.isEmpty()) {
-            result.append("以下文件当前被占用，无法删除（").append(busyFiles.size()).append("个）：\n");
-            for (String file : busyFiles) {
-                result.append("  ○ ").append(file).append("\n");
-            }
-            result.append("\n");
-            result.append("注意：部分文件无法删除是正常现象，因为这些文件正在被MCP服务器使用。\n");
-            result.append("已删除的项目不会受到影响，被占用的文件将在MCP服务器重启后可以被清除。\n");
-        } else if (!deletedItems.isEmpty()) {
-            result.append("所有项目已成功删除。\n");
-        }
-
+        result.append("cache: ").append(clearCacheRoot()).append("\n");
+        result.append("data : ").append(clearDirectoryContents(RuntimeDirs.getDataRoot())).append("\n");
+        result.append("log  : ").append(clearLog()).append("\n");
+        result.append("\nsettings 与 workspace_config.json 已保留（权限配置受保护）。\n");
         return result.toString();
+    }
+
+    /** 删除目录下的全部内容（保留目录本身）。 */
+    private static String clearDirectoryContents(Path dir) {
+        if (!Files.isDirectory(dir)) {
+            return "目录不存在，无需清除";
+        }
+        int deleted = 0;
+        List<String> busy = new ArrayList<>();
+        try (Stream<Path> entries = Files.list(dir)) {
+            for (Path entry : entries.toList()) {
+                try {
+                    deleteDirectoryRecursive(entry);
+                    deleted++;
+                } catch (IOException e) {
+                    busy.add(entry.getFileName().toString());
+                }
+            }
+        } catch (IOException e) {
+            return "读取失败：" + e.getMessage();
+        }
+        return "已删除 " + deleted + " 项" + (busy.isEmpty() ? "" : "；被占用：" + String.join(", ", busy));
     }
 
     /**
@@ -401,7 +294,7 @@ public class McpTools {
 
     /**
      * 确保当前工作区的 settings.properties 存在；不存在时写入默认配置。
-     * 配置位置随工作区变化：<工作区>/.dlqq/settings/settings.properties
+     * 配置位置：{@code <部署目录>/.dlqq/settings/<工作区hash>/settings.properties}
      */
     public static void ensureSettingsFile() {
         Path settingsPath = Workspace.getSettingsFile();
@@ -1612,16 +1505,20 @@ public class McpTools {
     // ==================== 缓存目录工具 ====================
 
     /**
-     * 获取缓存目录路径
-     * @return 缓存目录Path
+     * 获取当前会话缓存目录路径：
+     * {@code <部署目录>/.dlqq/cache/<工作区hash>/<会话hash>}。
+     *
+     * @return 缓存目录 Path
      */
     public static Path getCacheDir() {
-        return Workspace.getRoot().resolve(".dlqq/cache");
+        return SessionScope.currentCacheDir();
     }
 
     /**
-     * 确保缓存目录存在
-     * @return 缓存目录Path
+     * 确保当前会话缓存目录存在。
+     *
+     * @return 缓存目录 Path
+     * @throws IOException 创建目录失败
      */
     public static Path ensureCacheDir() throws IOException {
         Path cacheDir = getCacheDir();
@@ -1632,8 +1529,72 @@ public class McpTools {
     }
 
     /**
-     * 清除缓存目录
-     * 删除.dlqq/cache目录下的所有文件和子目录
+     * 清除缓存目录：不传参数清当前会话缓存；指定工作区清该工作区下所有会话缓存；
+     * {@code all=true} 清全部工作区缓存。
+     *
+     * @param workspace 工作区路径（可选）
+     * @param all       是否清除全部工作区缓存
+     * @return 清除结果描述
+     */
+    public static String clearCacheFor(String workspace, boolean all) {
+        if (all) {
+            return clearCacheRoot();
+        }
+        if (workspace != null && !workspace.trim().isEmpty()) {
+            Path workspacePath = Workspace.resolve(workspace);
+            if (!Files.isDirectory(workspacePath)) {
+                return "✗ 清除失败：工作区不是已存在的绝对目录: " + workspace;
+            }
+            String hash = WorkspaceRegistry.hashFor(workspacePath);
+            return clearCacheDirectory(RuntimeDirs.getCacheRoot().resolve(hash),
+                    "工作区 " + workspacePath + "（hash=" + hash + "）");
+        }
+        return clearCache();
+    }
+
+    /** 清除全部工作区的缓存内容（保留 cache 根目录）。 */
+    private static String clearCacheRoot() {
+        Path root = RuntimeDirs.getCacheRoot();
+        if (!Files.isDirectory(root)) {
+            return "✓ 缓存目录不存在，无需清除";
+        }
+        int deletedWorkspaces = 0;
+        List<String> busy = new ArrayList<>();
+        try (Stream<Path> entries = Files.list(root)) {
+            for (Path entry : entries.toList()) {
+                if (!Files.isDirectory(entry)) {
+                    continue;
+                }
+                try {
+                    deleteDirectoryRecursive(entry);
+                    deletedWorkspaces++;
+                } catch (IOException e) {
+                    busy.add(entry.getFileName().toString());
+                }
+            }
+        } catch (IOException e) {
+            return "✗ 清除失败：无法读取缓存目录 - " + e.getMessage();
+        }
+        return "✓ 全部工作区缓存清除完成：已删除 " + deletedWorkspaces + " 个工作区缓存目录"
+                + (busy.isEmpty() ? "" : "；被占用：" + String.join(", ", busy));
+    }
+
+    /** 清除指定工作区缓存目录并返回结果描述。 */
+    private static String clearCacheDirectory(Path cacheDir, String label) {
+        if (!Files.exists(cacheDir)) {
+            return "✓ " + label + " 的缓存目录不存在，无需清除";
+        }
+        try {
+            deleteDirectoryRecursive(cacheDir);
+            return "✓ " + label + " 的缓存清除完成";
+        } catch (IOException e) {
+            return "✗ 清除失败：" + label + " - " + e.getMessage();
+        }
+    }
+
+    /**
+     * 清除当前会话缓存目录。
+     *
      * @return 清除结果描述
      */
     public static String clearCache() {
@@ -1721,7 +1682,7 @@ public class McpTools {
      * @return 删除结果描述
      */
     public static String clearLog() {
-        Path logPath = Workspace.getRoot().resolve(".dlqq/log");
+        Path logPath = RuntimeDirs.getLogRoot();
 
         if (!Files.exists(logPath)) {
             return "✓ 日志目录不存在，无需清除";

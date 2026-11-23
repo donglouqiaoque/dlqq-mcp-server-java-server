@@ -9,23 +9,18 @@ import com.donglouqiaoque.dlqqmcpserver.mcp.transport.StdioTransport;
 import com.formdev.flatlaf.FlatDarkLaf;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
 import javax.swing.UIManager;
 import java.awt.GraphicsEnvironment;
 import java.io.IOException;
 import com.donglouqiaoque.dlqqmcpserver.mcp.tools.McpTools;
-import com.donglouqiaoque.dlqqmcpserver.utils.Workspace;
+import com.donglouqiaoque.dlqqmcpserver.utils.RuntimeDirs;
 import com.donglouqiaoque.dlqqmcpserver.utils.SessionScope;
-import java.io.File;
+import com.donglouqiaoque.dlqqmcpserver.utils.Workspace;
+import com.donglouqiaoque.dlqqmcpserver.utils.WorkspaceRegistry;
 import java.io.FileOutputStream;
-import java.io.FileWriter;
 import java.io.PrintStream;
 import java.nio.charset.Charset;
-import java.nio.file.attribute.DosFileAttributeView;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.format.DateTimeFormatter;
-import java.time.LocalDateTime;
 
 /**
  * MCP服务器入口
@@ -36,66 +31,30 @@ public class MCPServerMain {
     private static Logger logger;
 
     /**
-     * 初始化日志目录与 stderr 重定向（`.dlqq` 跟随工作区）。
+     * 初始化日志文件与 stderr 重定向：统一写到
+     * {@code <部署目录>/.dlqq/log/<transport>/<启动时间>.log}。
+     * 同一秒多次启动时由 {@link RuntimeDirs#createLogFile(String)} 追加 -2、-3 后缀。
      */
     private static void initLogging() {
         try {
-            // 生成当前时间字符串（格式：yyyy-MM-dd_HH-mm-ss），每次启动都创建新文件
-            String dateStr = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss"));
-
-            Path dlqqDir = Workspace.getRoot().resolve(".dlqq");
-            File logDir = dlqqDir.resolve("log").toFile();
-            File loggerDir = new File(logDir, "logger");
-            File stderrDir = new File(logDir, "stderr");
-
-            if (!logDir.exists()) {
-                logDir.mkdirs();
-            }
-            if (!loggerDir.exists()) {
-                loggerDir.mkdirs();
-            }
-            if (!stderrDir.exists()) {
-                stderrDir.mkdirs();
-            }
-
-            // 创建 .dlqq/.gitignore 文件，忽略该目录下的所有内容
-            File gitignoreFile = new File(dlqqDir.toFile(), ".gitignore");
-            if (!gitignoreFile.exists()) {
-                try (FileWriter writer = new FileWriter(gitignoreFile)) {
-                    writer.write("*\n");
-                }
-            }
-
-            // 尝试将 .dlqq 目录设置为隐藏（Windows），失败则忽略
-            try {
-                DosFileAttributeView dosView = Files.getFileAttributeView(
-                        dlqqDir, DosFileAttributeView.class);
-                if (dosView != null) {
-                    dosView.setHidden(true);
-                }
-            } catch (Exception ignored) {
-                // 设置隐藏失败，忽略
-            }
-
-            // 设置 SimpleLogger 的日志文件路径（带日期，绝对路径，位于工作区）
-            File loggerFile = new File(loggerDir, dateStr + ".log");
-            System.setProperty("org.slf4j.simpleLogger.logFile", loggerFile.getAbsolutePath());
+            String transportName = httpMode ? "http" : "stdio";
+            Path logFile = RuntimeDirs.createLogFile(transportName);
+            System.setProperty("org.slf4j.simpleLogger.logFile", logFile.toAbsolutePath().toString());
             // 设置为追加模式
             System.setProperty("org.slf4j.simpleLogger.append", "true");
 
-            // 重定向 stderr 到带日期的文件
-            File stderrFile = new File(stderrDir, dateStr + ".log");
             PrintStream stderrStream = new PrintStream(
-                new FileOutputStream(stderrFile, true), true, "UTF-8");
+                    new FileOutputStream(logFile.toFile(), true), true, "UTF-8");
             System.setErr(stderrStream);
         } catch (Exception e) {
-            // 如果重定向失败，保持默认的 stderr
+            // 日志文件创建失败由 RuntimeDirs 处理为启动失败；这里只兜底保留默认 stderr
+            System.err.println("[MCPServerMain] initLogging failed: " + e.getMessage());
         }
     }
 
-    /** 当前工作区的日志目录（工作区/.dlqq/log）。 */
+    /** 全局日志目录（{@code <部署目录>/.dlqq/log}）。 */
     private static Path getLogDir() {
-        return Workspace.getRoot().resolve(".dlqq").resolve("log");
+        return RuntimeDirs.getLogRoot();
     }
 
     // 全局变量用于健康检查
@@ -141,7 +100,11 @@ public class MCPServerMain {
         // --session-idle-minutes <n>）
         parseArgs(args);
 
-        // 初始化工作区：--workspace > 进程 CWD（工作区路径不持久化）
+        // 初始化全局运行时目录：<jar 目录>/.dlqq 与 default_workspace（失败则启动失败并弹窗）
+        RuntimeDirs.init();
+        WorkspaceRegistry.init();
+
+        // 初始化默认工作区：--workspace > 进程 CWD；不可用时回退 default_workspace
         Workspace.init(workspacePath);
 
         // 配置会话隔离参数（单进程多会话 × 多 Agent，含客户端下发的会话工作区）
@@ -153,7 +116,7 @@ public class MCPServerMain {
         System.setProperty("sun.stdout.encoding", "UTF-8");
         System.setProperty("sun.stderr.encoding", "UTF-8");
 
-        // 初始化工作区下的日志目录（.dlqq 跟随工作区），并创建 Logger
+        // 初始化全局日志文件（.dlqq/log/<transport>/<启动时间>.log）并创建 Logger
         initLogging();
         logger = LoggerFactory.getLogger(MCPServerMain.class);
 
@@ -163,20 +126,23 @@ public class MCPServerMain {
         // 预加载窗口 LOGO：运行中替换 JAR 后资源查找会失败，缓存可保证图标始终可用
         LogoLoader.preload();
 
-        // 确保当前工作区的 settings.properties 存在（配置随工作区变化）
-        McpTools.ensureSettingsFile();
+        // 确保当前工作区的 settings.properties 存在（全局 .dlqq/settings/<hash>/）
+        Workspace.ensureSettingsFileFor(Workspace.getRoot());
 
         // 重新初始化 stdout 的编码
         try {
             System.setOut(new PrintStream(System.out, true, "UTF-8"));
         } catch (Exception ignored) {
+            // stdout 编码设置失败不影响协议（JSON-RPC 按行写入）
         }
 
         logger.info("MCP Server starting...");
         logger.info("Working directory: {}", System.getProperty("user.dir"));
+        logger.info("Deploy directory: {}", RuntimeDirs.getAppDir());
+        logger.info("Runtime directory: {}", RuntimeDirs.getRoot());
         logger.info("Workspace: {} (source: {})", Workspace.getRoot(), Workspace.getSource());
         logger.info("Default charset: {}", Charset.defaultCharset().name());
-        logger.info("Log directory: {}", getLogDir());
+        logger.info("Log file: {}", RuntimeDirs.getCurrentLogFile());
         
         try {
             startServer();
