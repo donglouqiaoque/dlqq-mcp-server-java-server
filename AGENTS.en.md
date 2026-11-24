@@ -50,7 +50,7 @@
 
 ### Python (BLE tool)
 
-- **No system Python at runtime**: the BLE tool always uses the bundled `.runtime\python\` (interpreter, tkinter, Tcl/Tk, bleak, ttkbootstrap and pillow).
+- **No system Python at runtime**: the BLE tool always uses the bundled `.runtime\python\` (interpreter + bleak). The BLE UI is implemented in Java Swing; Python is only a **headless bleak backend** (`ble_service.py`) started by Java as a **child process**, communicates via **stdin/stdout JSON**, and its lifetime matches the Java process.
 - Ship the whole `.runtime\` directory. If `python\python.exe` is missing the BLE tool fails with an explicit error and never falls back to a Python on `PATH`; users can rebuild it with `make_python_env.bat`.
 
 ## 3. MCP client configuration
@@ -144,6 +144,7 @@ Full examples are in the "8) Connect over HTTP (Streamable HTTP)" section of [RE
 |--------|---------|--------|
 | `script\build.bat` | Build only: `mvn clean package -DskipTests` | `target\dlqq_mcp_server.jar` (thin jar) and `target\libs\` |
 | `script\build_and_copy.bat` | Build and sync to `.runtime\` | `.runtime\dlqq_mcp_server.jar`, `.runtime\libs\` |
+| `.runtime\build.bat` | Development build: `[nopause] [hot-build]`; by default deletes old `.runtime\libs` jars first (stop the server), `hot-build` keeps old jars and can run while the server is running | `.runtime\dlqq_mcp_server.jar`, `.runtime\libs\` |
 | `.runtime\make_python_env.bat` | One-click rebuild of the project Python env with bleak / ttkbootstrap / pillow | `.runtime\python\` (about 81 MB) |
 | `.runtime\start-http.bat` | Double-click HTTP launcher (uses `java\`, `libs\` and the sibling JAR; asks for the workspace first) | long-running HTTP service |
 | `.runtime\install_dlqq_mcp_dsh_client.bat` | Auto-install the DSH client plugin `dlqq-mcp-client`: download from Gitee first, fall back to GitHub; install dependencies and register it into the DSH profile (`link:` dependency + bundle + enabled patch entry) | `%USERPROFILE%\.dsh\plugins\dlqq-mcp-client`, updated DSH profile config |
@@ -185,11 +186,13 @@ src/main/java/com/donglouqiaoque/dlqqmcpserver/
 │   ├── protocol/                   # JsonRpcMessage, McpSchema
 │   ├── server/McpServer.java       # request dispatch + tool registry + getToolsInfo()
 │   ├── transport/                  # McpTransport, StdioTransport (stdio), HttpTransport (Streamable HTTP)
-│   └── tools/                      # AITools (registry) and tool implementations (ImageTools, AboutPanel, LogoLoader, WindowsNativeUtils, ...)
+│   └── tools/                      # AITools (registry), DeviceTools (peripheral tools) and tool implementations
+├── device/                        # UartDevices/UsbDevices/WifiDevices/BleDevices + console tab panels
+├── env/                           # EnvTabPanel (Environment tab: Java/Python detection, deps, rebuild)
 └── utils/                          # FileUtils, AIRulesUtils, CalculatorUtils
 src/main/resources/
-├── py/ble_tools.py                 # BLE GUI tool (Python + bleak, driven by Java over a socket)
-├── image/logo.ico                  # window icon (ICO, used by Python/BLE)
+├── py/ble_service.py               # headless BLE backend (bleak + stdin/stdout JSON, Java child process)
+├── image/logo.ico                  # window icon (ICO)
 ├── image/logo.png                  # window icon (PNG, used by LogoLoader)
 └── simplelogger.properties
 ```
@@ -237,6 +240,15 @@ Server console: on startup (with a graphical environment) it **starts hidden in 
 window; **single-click** the tray icon or use the tray menu "Show console" to open it. The menu bar shows the Chinese
 app name "鸫楼桥鹊MCP服务器控制台" (dropdown: hide/exit) with "联系作者：https://www.donglouqiaoque.com" in its
 centre (clickable, opens the default browser) and a Refresh button on its right (small right margin); the
+**tabs `Sessions` / `BLE` / `UART` / `USB` / `WiFi` / `Environment` sit above the table**; peripherals no longer open separate
+windows — every device is shown and managed inside its tab as a device list + panel (UART by COM port, USB by
+`VID:PID:bus:address`, BLE by MAC, WiFi by interface/SSID).
+The `Environment` tab shows Java (version/vendor/install dir/JAR/heap) and Python (interpreter/version/pip/bleak)
+and provides buttons to open directories, install/update BLE dependencies, and rebuild the Python environment
+(via `.runtime\make_python_env.bat`).
+The **Refresh button refreshes the currently selected tab**: Sessions refreshes the table; BLE refreshes backend status/device
+lists; UART and USB re-enumerate devices; WiFi refreshes interfaces and connection status; Environment re-detects Java/Python.
+Individual tabs no longer provide their own refresh buttons.
 native title bar text is cleared. The table is sorted by last activity (descending) and shows active sessions plus
 workspaces recorded in `workspace_config.json` (columns: session key/workspace/source/resource permission/operation
 permission/last activity `yyyy-MM-dd HH:mm:ss`); the resource-permission, operation-permission and last-activity columns
@@ -250,7 +262,7 @@ only "Exit server" terminates the MCP server process.
 
 ## 6. Tool overview
 
-**159** tools in total. Implementations live in `mcp/tools/`; parameters are documented in [README.en.md](README.en.md).
+**120** tools in total. Implementations live in `mcp/tools/`; parameters are documented in [README.en.md](README.en.md).
 The 13 project-script tools (build/flash/run/debug) and the 13 script-path setters are **commented out at the source**
 per the permission architecture, and `dlqq_test_hot_reload` is shielded too; the background-program tools use the
 new names (`dlqq_kill_command`, ...).
@@ -261,10 +273,10 @@ new names (`dlqq_kill_command`, ...).
 | Directory operations | 8 | mdir, mdirs, tree listing, recursive copy, ... |
 | Search | 4 | files, directories, text in a directory, text in one file |
 | Dialogs | 3 | text input, confirmation, file picker (Swing) |
-| Serial UART | 17 | window + open/close + send/receive + log (Python optional) |
-| BLE | 21 | 20 Bluetooth tools + 1 script release (Python bleak + socket) |
-| USB | 15 | usb4java, HID/CDC |
-| WiFi | 12 | netsh / nmcli, native Java |
+| UART | 5 | console tab; addressed by COM name, multiple ports at once, send/receive/log |
+| BLE | 10 | console tab (Java Swing); headless Python bleak backend, addressed by MAC |
+| USB | 5 | console tab; usb4java, addressed by `VID:PID:bus:address` |
+| WiFi | 5 | console tab; netsh / nmcli, network interface / SSID based |
 | Mouse / keyboard / screen | 14 | `java.awt.Robot` + `dlqq_capture_screen` |
 | Image / Office | 3 | image conversion, Office read and conversion |
 | Time / calculators | 4 | time 1 + calculators 3 |

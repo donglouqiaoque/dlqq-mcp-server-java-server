@@ -86,58 +86,63 @@
 | `dlqq_dialog_check` | 确认对话框，用户选择是/否（独立窗口） |
 | `dlqq_dialog_file_path` | 文件选择对话框（独立窗口） |
 
-### 串口工具 (32-48)
+### UART 工具（5 个）
+
+UART/USB/WiFi/BLE 外设统一在**控制台窗口的选项卡**中承载，不再为每个设备单独开窗口。工具按**设备名称**（COM3、COM4、ttyUSB0…）寻址，不再使用实例端口号；同一 MCP 服务器可同时打开多个串口。
 
 | 工具名称 | 描述 |
 |---------|------|
-| `dlqq_run_uart` | 启动CH340串口工具（打开图形界面） |
-| `dlqq_uart_get_com` | 获取可用串口通道列表 |
-| `dlqq_uart_refresh_com` | 刷新可用串口列表 |
-| `dlqq_uart_open_com` | 打开指定串口通道 |
-| `dlqq_uart_reopen_com` | 重新打开串口（可更换波特率） |
-| `dlqq_uart_close_com` | 关闭当前串口通道 |
-| `dlqq_uart_send_text` | 发送文本数据到串口 |
-| `dlqq_uart_send_hex` | 发送16进制数据到串口 |
-| `dlqq_uart_get_log` | 获取串口日志数据（支持文本/HEX格式） |
-| `dlqq_uart_get_log_text` | 获取串口日志数据（强制文本格式） |
-| `dlqq_uart_get_log_hex` | 获取串口日志数据（强制HEX格式） |
-| `dlqq_uart_clear_text` | 清除串口数据缓冲区 |
-| `dlqq_uart_get_line_count` | 获取当前缓冲区行数 |
-| `dlqq_uart_set_text_size` | 设置串口数据缓冲区大小 |
-| `dlqq_uart_switch_text_hex` | 切换日志显示格式（文本/HEX） |
-| `dlqq_exit_uart` | 退出串口工具（关闭窗口及进程） |
-| `dlqq_rerun_uart` | 重新启动串口工具（先关闭再启动，用于刷新窗口） |
+| `dlqq_uart_list` | 列出系统串口与已打开的设备 |
+| `dlqq_uart_open` | 按串口名打开设备，可指定波特率（默认 1000000） |
+| `dlqq_uart_close` | 关闭指定串口设备 |
+| `dlqq_uart_send` | 向指定串口发送文本或 HEX 数据 |
+| `dlqq_uart_get_log` | 获取指定串口设备的收发日志 |
 
-### BLE脚本管理工具
+**示例**：
+```json
+// 列出串口
+{}
+
+// 打开 COM3
+{ "device": "COM3", "baud_rate": 1000000 }
+
+// 发送文本
+{ "device": "COM3", "data": "Hello UART" }
+
+// 发送 HEX
+{ "device": "COM3", "data": "FF 01 02 03", "format": "hex" }
+```
+
+### BLE 工具（10 个）
+
+BLE 的 UI 已用 **Java Swing** 重写并并入控制台窗口；Python 仅保留**无界面 bleak 后端**，通过 **stdin/stdout JSON** 与 Java 通信，作为 Java 子进程运行，生命周期与 Java 进程一致。BLE 工具按 **MAC 地址**寻址，可同时连接多个设备。
 
 | 工具名称 | 描述 |
 |---------|------|
-| `dlqq_ble_release_script` | 释放BLE Python脚本到项目目录 |
+| `dlqq_ble_scan` | 扫描 BLE 设备（指定扫描时长） |
+| `dlqq_ble_get_devices` | 获取最近一次扫描到的设备列表（含 MAC） |
+| `dlqq_ble_connect` | 按 MAC 地址连接设备（可同时连接多个） |
+| `dlqq_ble_disconnect` | 断开指定设备 |
+| `dlqq_ble_discover` | 发现设备的服务与特征 |
+| `dlqq_ble_read` | 读取特征值（返回 HEX） |
+| `dlqq_ble_write` | 写入特征值（文本或 HEX） |
+| `dlqq_ble_subscribe` | 订阅特征通知 |
+| `dlqq_ble_unsubscribe` | 取消订阅特征通知 |
+| `dlqq_ble_get_log` | 获取 BLE 后端日志 |
 
-### BLE蓝牙工具 (53-72)
+**示例**：
+```json
+// 扫描 5 秒
+{ "timeout": 5 }
 
-| 工具名称 | 描述 |
-|---------|------|
-| `dlqq_run_ble` | 启动BLE蓝牙工具（打开图形界面） |
-| `dlqq_ble_scan` | 扫描BLE设备 |
-| `dlqq_ble_get_devices` | 获取扫描到的设备列表 |
-| `dlqq_ble_connect` | 连接BLE设备 |
-| `dlqq_ble_disconnect` | 断开BLE设备连接 |
-| `dlqq_ble_discover` | 发现BLE服务和特征 |
-| `dlqq_ble_read` | 读取BLE特征值 |
-| `dlqq_ble_write_text` | 写入BLE特征值（文本） |
-| `dlqq_ble_write_hex` | 写入BLE特征值（HEX） |
-| `dlqq_ble_subscribe` | 订阅/取消订阅BLE通知 |
-| `dlqq_ble_get_log` | 获取BLE日志数据（支持文本/HEX格式） |
-| `dlqq_ble_get_log_text` | 获取BLE日志数据（强制文本格式） |
-| `dlqq_ble_get_log_hex` | 获取BLE日志数据（强制HEX格式） |
-| `dlqq_ble_clear` | 清除BLE数据缓冲区 |
-| `dlqq_ble_get_line_count` | 获取当前缓冲区行数 |
-| `dlqq_ble_set_buffer_size` | 设置BLE数据缓冲区大小 |
-| `dlqq_ble_switch_text_hex` | 切换日志显示格式（文本/HEX） |
-| `dlqq_exit_ble` | 退出BLE工具（关闭窗口及进程） |
-| `dlqq_check_bluetooth_open` | 检查Windows电脑的蓝牙适配器是否已开启 |
-| `dlqq_rerun_ble` | 重新启动BLE工具（先关闭再启动，用于刷新窗口） |
+// 连接设备
+{ "address": "11:22:33:44:55:66" }
+
+// 写入 HEX
+{ "address": "11:22:33:44:55:66", "characteristic": "0000fff1-...", "data": "01 02", "format": "hex" }
+```
+
+> `dlqq_check_bluetooth_open`（检查蓝牙适配器是否开启）仍保留，属于系统信息工具。
 
 ### MCP数据管理工具 (73-78)
 
@@ -259,84 +264,46 @@
 }
 ```
 
-### USB工具 (89-102)
+### USB 工具（5 个）
 
-USB通信工具，支持HID和CDC设备的扫描、连接和数据收发。基于usb4java库实现跨平台USB通信。
+USB 面板已并入控制台窗口；USB 工具基于 usb4java，按设备标识 `VID:PID:bus:address` 寻址，不使用实例端口号。支持批量/中断端点的数据收发。
 
 | 工具名称 | 描述 |
 |---------|------|
-| `dlqq_run_usb` | 启动USB工具（打开图形界面） |
-| `dlqq_usb_scan` | 扫描可用的USB HID/CDC设备 |
-| `dlqq_usb_get_devices` | 获取已扫描的USB设备列表 |
-| `dlqq_usb_open` | 打开指定的USB设备（通过VID/PID） |
-| `dlqq_usb_close` | 关闭当前打开的USB设备 |
-| `dlqq_usb_send_text` | 向USB设备发送文本数据 |
-| `dlqq_usb_send_hex` | 向USB设备发送十六进制数据 |
-| `dlqq_usb_get_log` | 获取USB通信日志 |
-| `dlqq_usb_get_log_text` | 获取USB通信日志（强制文本格式） |
-| `dlqq_usb_get_log_hex` | 获取USB通信日志（强制HEX格式） |
-| `dlqq_usb_clear` | 清除USB数据缓冲区 |
-| `dlqq_usb_get_line_count` | 获取USB缓冲区当前的日志行数 |
-| `dlqq_usb_switch_text_hex` | 切换USB日志的显示格式（文本/HEX） |
-| `dlqq_exit_usb` | 退出USB工具（关闭窗口及进程） |
-| `dlqq_rerun_usb` | 重新启动USB工具（先关闭再启动） |
-
-**支持的设备类型**：
-- **HID设备** - USB人体学接口设备，如键盘、鼠标、自定义HID设备
-- **CDC设备** - USB通信设备类，如虚拟串口设备
+| `dlqq_usb_list` | 扫描并列出 USB 设备（含可直接使用的设备标识） |
+| `dlqq_usb_open` | 按设备标识打开 USB 设备 |
+| `dlqq_usb_close` | 关闭指定 USB 设备 |
+| `dlqq_usb_send` | 向设备端点发送文本或 HEX 数据 |
+| `dlqq_usb_get_log` | 获取指定设备的收发日志 |
 
 **示例**：
 ```json
-// 启动USB工具
-{ "port": 9001 }
+// 列出设备（返回 key，例如 0483:5740:1:2）
+{}
 
-// 扫描设备
-{ "port": 9001 }
+// 打开设备
+{ "device": "0483:5740:1:2" }
 
-// 打开设备（VID=0x0483, PID=0x5740）
-{
-  "port": 9001,
-  "vid": "0x0483",
-  "pid": "0x5740",
-  "type": "HID"
-}
-
-// 发送十六进制数据
-{
-  "port": 9001,
-  "hex_array": ["FF", "01", "02", "03"]
-}
-
-// 发送文本数据
-{
-  "port": 9001,
-  "text": "Hello USB"
-}
+// 发送 HEX 数据
+{ "device": "0483:5740:1:2", "data": "FF 01 02 03", "format": "hex" }
 ```
 
-### WiFi工具 (103-114)
+### WiFi 工具（5 个）
 
-WiFi工具（Java原生实现），支持扫描周围WiFi网络、查看连接状态、连接/断开WiFi。
+WiFi 面板已并入控制台窗口；WiFi 工具（Java 原生实现）按系统无线网卡/SSID 操作，不使用实例端口号。
 
 | 工具名称 | 描述 |
 |---------|------|
-| `dlqq_run_wifi` | 启动WiFi工具（打开图形界面窗口） |
-| `dlqq_wifi_scan` | 扫描周围的WiFi网络 |
-| `dlqq_wifi_get_networks` | 获取最近一次扫描的网络列表 |
-| `dlqq_wifi_status` | 获取当前WiFi连接状态 |
-| `dlqq_wifi_profiles` | 列出系统已保存的WiFi配置文件 |
-| `dlqq_wifi_connect` | 连接指定WiFi（SSID+密码，支持WPA/WPA2-PSK和开放网络） |
-| `dlqq_wifi_disconnect` | 断开当前WiFi连接 |
-| `dlqq_wifi_get_log` | 获取WiFi工具日志 |
-| `dlqq_wifi_clear_log` | 清除WiFi工具日志 |
-| `dlqq_wifi_get_line_count` | 获取WiFi工具日志行数 |
-| `dlqq_exit_wifi` | 关闭WiFi工具 |
-| `dlqq_rerun_wifi` | 重新启动WiFi工具 |
+| `dlqq_wifi_interfaces` | 列出无线网卡接口及当前连接状态 |
+| `dlqq_wifi_scan` | 扫描周围的 WiFi 网络 |
+| `dlqq_wifi_status` | 查询当前无线连接状态 |
+| `dlqq_wifi_connect` | 连接指定 WiFi（使用系统已有配置文件） |
+| `dlqq_wifi_disconnect` | 断开当前 WiFi 连接 |
 
 **说明**：
-- Java原生实现（Swing GUI + 系统命令），不依赖Python
-- Windows使用 `netsh wlan`，Linux使用 `nmcli`
-- 部分操作（如添加配置文件）需要管理员权限
+- Windows 使用 `netsh wlan`，Linux 使用 `nmcli`；
+- 一块无线网卡同一时间只能连接一个网络；多网卡才可能同时连接多个网络；
+- 连接新的 WiFi 需要系统里已有对应配置文件（或由用户在系统设置中创建）。
 
 ### 鼠标工具 (115-121)
 
@@ -533,7 +500,13 @@ script\build.bat
 
 REM 构建并复制到发布目录（推荐）
 script\build_and_copy.bat
+
+REM 开发期热构建：不删除 .runtime\libs 旧库，可在服务运行中使用
+.runtime\build.bat nopause hot-build
 ```
+
+- `.runtime\build.bat` 不带 `hot-build`：先删除 `.runtime\libs\*.jar` 再复制，**需先停止服务**（运行中的服务会锁定已加载的 jar）；
+- 带 `hot-build`：保留旧库、只覆盖有变化的依赖，可在服务运行中构建；旧版本 jar 会累积，建议定期停服执行一次默认清理构建。
 
 构建产物：
 
@@ -1450,6 +1423,10 @@ curl -X POST http://localhost:49129/mcp -H "Content-Type: application/json" \
 ```
 
 **返回**：选中的文件路径
+
+> **架构变更说明**：外设工具（UART/BLE/USB/WiFi）已改为"控制台选项卡 + 设备地址/名称寻址"，
+> 不再使用实例端口号；下文 28–114 号旧版逐工具说明仅作历史参考，
+> 当前参数与示例请以上方"工具概览"章节及运行中的工具 schema 为准。
 
 ### 28. dlqq_run_uart
 
@@ -2909,9 +2886,14 @@ settings.json
 
 服务启动后（有图形环境时）控制台**默认隐藏到系统托盘**，不弹出窗口；**单击**托盘图标或托盘菜单"显示控制台"可打开：
 
+- 菜单栏下方为选项卡：**会话管理 / BLE / UART / USB / WiFi / 环境**；外设不再单独开窗，设备在各自选项卡内以列表 + 面板管理；
+  **环境**选项卡展示 Java（版本/供应商/安装目录/JAR/堆内存）与 Python（解释器/版本/pip/bleak）信息，并提供打开目录、
+  安装/更新 BLE 依赖、重建 Python 环境（调用 `.runtime\make_python_env.bat`）的入口；
 - 窗口菜单栏显示中文名「鸫楼桥鹊MCP服务器控制台」（下拉含"隐藏到托盘 / 退出服务器"），右侧为「刷新」按钮（靠右留出间距）；
+  **「刷新」按钮刷新当前选中选项卡**：会话管理刷新表格；BLE 刷新后端状态/设备列表；UART、USB 重新枚举设备；
+  WiFi 刷新网卡与连接状态；环境重新检测 Java/Python 信息；各选项卡内部不再单独放"刷新"按钮；
 - 系统标题栏中间的标题文字已置空（不显示窗口标题）；菜单栏**中间显示「联系作者：https://www.donglouqiaoque.com」**
-  （可点击，打开默认浏览器）；菜单栏下方为会话/工作区表格；
+  （可点击，打开默认浏览器）；表格默认显示"会话管理"选项卡；
 - 表格按**最后活跃时间倒序**展示两类行：活跃会话行，以及 `workspace_config.json` 中出现过但当前无活跃会话的工作区行；
   列包括：会话键（工作区行显示"（工作区）"）、工作区、来源（`session cwd (...)` / `server console` / `workspace_config.json`）、
   资源权限、操作权限、最后活跃（`yyyy-MM-dd HH:mm:ss`，每 2 秒自动刷新）；
@@ -3175,91 +3157,50 @@ DSH 官方 `@deepseek-ai/dsh-mcp-client` 不发送 `_meta`，所有对话共享�
 | dlqq_clear_pwsh_list | 风险 | 无危 | 完全访问 |
 | dlqq_refresh_pwsh_list | 无危 | 无危 | 完全访问 |
 
-#### 4.6 串口 UART（17）
+#### 4.6 UART（5）
 
 | 工具名称 | 资源风险 | 外设风险 | 默认隐藏状态 |
 |---|---|---|---|
-| dlqq_run_uart | 无危 | 风险 | 完全访问 |
-| dlqq_rerun_uart | 无危 | 风险 | 完全访问 |
-| dlqq_exit_uart | 无危 | 风险 | 完全访问 |
-| dlqq_uart_open_com | 无危 | 风险 | 完全访问 |
-| dlqq_uart_close_com | 无危 | 风险 | 完全访问 |
-| dlqq_uart_reopen_com | 无危 | 风险 | 完全访问 |
-| dlqq_uart_refresh_com | 无危 | 无危 | 完全访问 |
-| dlqq_uart_get_com | 无危 | 无危 | 完全访问 |
-| dlqq_uart_send_text | 无危 | 风险 | 完全访问 |
-| dlqq_uart_send_hex | 无危 | 风险 | 完全访问 |
+| dlqq_uart_list | 无危 | 无危 | 完全访问 |
+| dlqq_uart_open | 无危 | 风险 | 完全访问 |
+| dlqq_uart_close | 无危 | 风险 | 完全访问 |
+| dlqq_uart_send | 无危 | 风险 | 完全访问 |
 | dlqq_uart_get_log | 无危 | 无危 | 完全访问 |
-| dlqq_uart_get_log_text | 无危 | 无危 | 完全访问 |
-| dlqq_uart_get_log_hex | 无危 | 无危 | 完全访问 |
-| dlqq_uart_switch_text_hex | 无危 | 无危 | 完全访问 |
-| dlqq_uart_clear_text | 无危 | 无危 | 完全访问 |
-| dlqq_uart_get_line_count | 无危 | 无危 | 完全访问 |
-| dlqq_uart_set_text_size | 无危 | 无危 | 完全访问 |
 
-#### 4.7 蓝牙 BLE（21）
+#### 4.7 BLE（10）
 
 | 工具名称 | 资源风险 | 外设风险 | 默认隐藏状态 |
 |---|---|---|---|
-| dlqq_run_ble | 无危 | 风险 | 完全访问 |
-| dlqq_rerun_ble | 无危 | 风险 | 完全访问 |
-| dlqq_exit_ble | 无危 | 风险 | 完全访问 |
 | dlqq_ble_scan | 无危 | 风险 | 完全访问 |
 | dlqq_ble_get_devices | 无危 | 无危 | 完全访问 |
 | dlqq_ble_connect | 无危 | 风险 | 完全访问 |
 | dlqq_ble_disconnect | 无危 | 风险 | 完全访问 |
 | dlqq_ble_discover | 无危 | 风险 | 完全访问 |
 | dlqq_ble_read | 无危 | 无危 | 完全访问 |
-| dlqq_ble_write_text | 无危 | 风险 | 完全访问 |
-| dlqq_ble_write_hex | 无危 | 风险 | 完全访问 |
+| dlqq_ble_write | 无危 | 风险 | 完全访问 |
 | dlqq_ble_subscribe | 无危 | 风险 | 完全访问 |
+| dlqq_ble_unsubscribe | 无危 | 风险 | 完全访问 |
 | dlqq_ble_get_log | 无危 | 无危 | 完全访问 |
-| dlqq_ble_get_log_text | 无危 | 无危 | 完全访问 |
-| dlqq_ble_get_log_hex | 无危 | 无危 | 完全访问 |
-| dlqq_ble_switch_text_hex | 无危 | 无危 | 完全访问 |
-| dlqq_ble_clear | 无危 | 无危 | 完全访问 |
-| dlqq_ble_get_line_count | 无危 | 无危 | 完全访问 |
-| dlqq_ble_set_buffer_size | 无危 | 无危 | 完全访问 |
-| dlqq_ble_release_script | 风险 | 无危 | 完全访问 |
-| dlqq_check_bluetooth_open | 无危 | 无危 | 完全访问 |
 
-#### 4.8 USB（15）
+#### 4.8 USB（5）
 
 | 工具名称 | 资源风险 | 外设风险 | 默认隐藏状态 |
 |---|---|---|---|
-| dlqq_run_usb | 无危 | 风险 | 完全访问 |
-| dlqq_rerun_usb | 无危 | 风险 | 完全访问 |
-| dlqq_exit_usb | 无危 | 风险 | 完全访问 |
-| dlqq_usb_scan | 无危 | 风险 | 完全访问 |
-| dlqq_usb_get_devices | 无危 | 无危 | 完全访问 |
+| dlqq_usb_list | 无危 | 风险 | 完全访问 |
 | dlqq_usb_open | 无危 | 风险 | 完全访问 |
 | dlqq_usb_close | 无危 | 风险 | 完全访问 |
-| dlqq_usb_send_text | 无危 | 风险 | 完全访问 |
-| dlqq_usb_send_hex | 无危 | 风险 | 完全访问 |
+| dlqq_usb_send | 无危 | 风险 | 完全访问 |
 | dlqq_usb_get_log | 无危 | 无危 | 完全访问 |
-| dlqq_usb_get_log_text | 无危 | 无危 | 完全访问 |
-| dlqq_usb_get_log_hex | 无危 | 无危 | 完全访问 |
-| dlqq_usb_switch_text_hex | 无危 | 无危 | 完全访问 |
-| dlqq_usb_clear | 无危 | 无危 | 完全访问 |
-| dlqq_usb_get_line_count | 无危 | 无危 | 完全访问 |
 
-#### 4.9 WiFi（12）
+#### 4.9 WiFi（5）
 
 | 工具名称 | 资源风险 | 外设风险 | 默认隐藏状态 |
 |---|---|---|---|
-| dlqq_run_wifi | 无危 | 风险 | 完全访问 |
-| dlqq_rerun_wifi | 无危 | 风险 | 完全访问 |
-| dlqq_exit_wifi | 无危 | 风险 | 完全访问 |
+| dlqq_wifi_interfaces | 无危 | 无危 | 完全访问 |
 | dlqq_wifi_scan | 无危 | 风险 | 完全访问 |
-| dlqq_wifi_get_networks | 无危 | 无危 | 完全访问 |
+| dlqq_wifi_status | 无危 | 无危 | 完全访问 |
 | dlqq_wifi_connect | 无危 | 风险 | 完全访问 |
 | dlqq_wifi_disconnect | 无危 | 风险 | 完全访问 |
-| dlqq_wifi_status | 无危 | 无危 | 完全访问 |
-| dlqq_wifi_profiles | 无危 | 无危 | 完全访问 |
-| dlqq_wifi_get_log | 无危 | 无危 | 完全访问 |
-| dlqq_wifi_clear_log | 无危 | 无危 | 完全访问 |
-| dlqq_wifi_get_line_count | 无危 | 无危 | 完全访问 |
-
 #### 4.10 鼠标 / 键盘 / 屏幕（14）
 
 | 工具名称 | 资源风险 | 外设风险 | 默认隐藏状态 |

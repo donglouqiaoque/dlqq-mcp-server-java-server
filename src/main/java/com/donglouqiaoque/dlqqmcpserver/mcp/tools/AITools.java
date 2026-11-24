@@ -74,50 +74,52 @@ public class AITools {
         registerDialogCheckTool(server);          // dlqq_dialog_check
         registerDialogFilePathTool(server);       // dlqq_dialog_file_path
 
-        // ========== 串口工具 (25-32) ==========
-        registerRunUartTool(server);              // dlqq_run_uart
-        registerUartGetComTool(server);         // dlqq_uart_get_com
-        registerUartRefreshComTool(server);       // dlqq_uart_refresh_com
-        registerUartOpenComTool(server);          // dlqq_uart_open_com
-        registerUartReopenComTool(server);        // dlqq_uart_reopen_com
-        registerUartCloseComTool(server);         // dlqq_uart_close_com
-        registerUartSendTextTool(server);         // dlqq_uart_send_text
-        registerUartSendHexTool(server);          // dlqq_uart_send_hex
-        registerUartGetLogTool(server);           // dlqq_uart_get_log
-        registerUartGetLogTextTool(server);       // dlqq_uart_get_log_text
-        registerUartGetLogHexTool(server);        // dlqq_uart_get_log_hex
-        registerUartClearTextTool(server);        // dlqq_uart_clear_text
-        registerUartGetLineCountTool(server);     // dlqq_uart_get_line_count
-        registerUartSetTextSizeTool(server);      // dlqq_uart_set_text_size
-        registerUartSwitchTextHexTool(server);    // dlqq_uart_switch_text_hex
-        registerExitUartTool(server);             // dlqq_exit_uart
-        registerRerunUartTool(server);            // dlqq_rerun_uart
+        // ========== 外设设备工具（新架构：按设备地址/名称寻址，无实例端口号） ==========
+        DeviceTools.registerTools(server);          // dlqq_uart_* / dlqq_usb_* / dlqq_wifi_* / dlqq_ble_*
 
-        // ========== BLE库管理工具 (30-33) ==========
-        // dlqq_ble_lib_has / dlqq_ble_lib_install / dlqq_ble_lib_update 已移除：
-        // Python 运行时固定使用随包分发的 python 目录，不再由 AI 查询或安装库。
-        registerBleReleaseScriptTool(server);   // dlqq_ble_release_script
+        // 旧版外设工具已停用：实例端口模型由控制台设备选项卡 + 设备地址参数取代。
+        // registerRunUartTool(server);
+        // registerUartGetComTool(server);
+        // registerUartRefreshComTool(server);
+        // registerUartOpenComTool(server);
+        // registerUartReopenComTool(server);
+        // registerUartCloseComTool(server);
+        // registerUartSendTextTool(server);
+        // registerUartSendHexTool(server);
+        // registerUartGetLogTool(server);
+        // registerUartGetLogTextTool(server);
+        // registerUartGetLogHexTool(server);
+        // registerUartClearTextTool(server);
+        // registerUartGetLineCountTool(server);
+        // registerUartSetTextSizeTool(server);
+        // registerUartSwitchTextHexTool(server);
+        // registerExitUartTool(server);
+        // registerRerunUartTool(server);
 
-        // ========== BLE蓝牙工具 (34-45) ==========
-        registerRunBleTool(server);               // dlqq_run_ble
-        registerBleScanTool(server);              // dlqq_ble_scan
-        registerBleGetDevicesTool(server);        // dlqq_ble_get_devices
-        registerBleConnectTool(server);           // dlqq_ble_connect
-        registerBleDisconnectTool(server);        // dlqq_ble_disconnect
-        registerBleDiscoverTool(server);          // dlqq_ble_discover
-        registerBleReadTool(server);              // dlqq_ble_read
-        registerBleWriteTextTool(server);         // dlqq_ble_write_text
-        registerBleWriteHexTool(server);          // dlqq_ble_write_hex
-        registerBleSubscribeTool(server);         // dlqq_ble_subscribe
-        registerBleGetLogTool(server);            // dlqq_ble_get_log
-        registerBleGetLogTextTool(server);        // dlqq_ble_get_log_text
-        registerBleGetLogHexTool(server);         // dlqq_ble_get_log_hex
-        registerBleClearTool(server);             // dlqq_ble_clear
-        registerBleGetLineCountTool(server);      // dlqq_ble_get_line_count
-        registerBleSetBufferSizeTool(server);     // dlqq_ble_set_buffer_size
-        registerBleSwitchTextHexTool(server);     // dlqq_ble_switch_text_hex
-        registerExitBleTool(server);              // dlqq_exit_ble
-        registerRerunBleTool(server);             // dlqq_rerun_ble
+        // ========== BLE 库管理工具 ==========
+        // BLE Python 脚本由 BleDevices 自动释放，不再单独暴露释放工具。
+        // registerBleReleaseScriptTool(server);
+
+        // 旧版 BLE 工具已停用（由 DeviceTools 的 dlqq_ble_* 取代）。
+        // registerRunBleTool(server);
+        // registerBleScanTool(server);
+        // registerBleGetDevicesTool(server);
+        // registerBleConnectTool(server);
+        // registerBleDisconnectTool(server);
+        // registerBleDiscoverTool(server);
+        // registerBleReadTool(server);
+        // registerBleWriteTextTool(server);
+        // registerBleWriteHexTool(server);
+        // registerBleSubscribeTool(server);
+        // registerBleGetLogTool(server);
+        // registerBleGetLogTextTool(server);
+        // registerBleGetLogHexTool(server);
+        // registerBleClearTool(server);
+        // registerBleGetLineCountTool(server);
+        // registerBleSetBufferSizeTool(server);
+        // registerBleSwitchTextHexTool(server);
+        // registerExitBleTool(server);
+        // registerRerunBleTool(server);
 
         // ========== 系统信息工具 ==========
         registerGetMcpVersionTool(server);          // dlqq_get_mcp_version
@@ -158,22 +160,22 @@ public class AITools {
         // ========== 命令执行工具 ==========
         RunCommandTools.registerTools(server);      // dlqq_run_command
 
-        // ========== USB工具 (88-101) ==========
-        registerRunUsbTool(server);                 // dlqq_run_usb
-        registerUsbScanTool(server);                // dlqq_usb_scan
-        registerUsbGetDevicesTool(server);            // dlqq_usb_get_devices
-        registerUsbOpenTool(server);                // dlqq_usb_open
-        registerUsbCloseTool(server);               // dlqq_usb_close
-        registerUsbSendTextTool(server);            // dlqq_usb_send_text
-        registerUsbSendHexTool(server);             // dlqq_usb_send_hex
-        registerUsbGetLogTool(server);              // dlqq_usb_get_log
-        registerUsbGetLogTextTool(server);          // dlqq_usb_get_log_text
-        registerUsbGetLogHexTool(server);           // dlqq_usb_get_log_hex
-        registerUsbClearTool(server);               // dlqq_usb_clear
-        registerUsbGetLineCountTool(server);        // dlqq_usb_get_line_count
-        registerUsbSwitchTextHexTool(server);       // dlqq_usb_switch_text_hex
-        registerExitUsbTool(server);                  // dlqq_exit_usb
-        registerRerunUsbTool(server);                 // dlqq_rerun_usb
+        // ========== 旧版 USB 工具已停用（由 DeviceTools 的 dlqq_usb_* 取代） ==========
+        // registerRunUsbTool(server);
+        // registerUsbScanTool(server);
+        // registerUsbGetDevicesTool(server);
+        // registerUsbOpenTool(server);
+        // registerUsbCloseTool(server);
+        // registerUsbSendTextTool(server);
+        // registerUsbSendHexTool(server);
+        // registerUsbGetLogTool(server);
+        // registerUsbGetLogTextTool(server);
+        // registerUsbGetLogHexTool(server);
+        // registerUsbClearTool(server);
+        // registerUsbGetLineCountTool(server);
+        // registerUsbSwitchTextHexTool(server);
+        // registerExitUsbTool(server);
+        // registerRerunUsbTool(server);
 
         // ========== 项目构建和芯片操作工具 ==========
         // 【源码屏蔽】根据《MCP 工具权限架构》：项目构建/芯片操作/脚本路径设置类工具不暴露给 AI
@@ -211,8 +213,8 @@ public class AITools {
         // registerSetRebuildRunScriptTool(server);    // dlqq_set_rebuild_run_script
         // registerSetRebuildDebugScriptTool(server);  // dlqq_set_rebuild_debug_script
 
-        // ========== WiFi工具 ==========
-        WifiTools.registerTools(server);            // dlqq_run_wifi 等12个
+        // ========== 旧版 WiFi 工具已停用（由 DeviceTools 的 dlqq_wifi_* 取代） ==========
+        // WifiTools.registerTools(server);
 
         // ========== 鼠标工具 ==========
         MouseTools.registerTools(server);           // dlqq_mouse_get_position 等7个

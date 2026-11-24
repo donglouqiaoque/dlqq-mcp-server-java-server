@@ -8,9 +8,11 @@ REM Fixed location: <project root>\.runtime\build.bat
 REM Project root is the parent directory of this script folder.
 REM
 REM Usage:
-REM   build.bat [nopause]
+REM   build.bat [nopause] [hot-build]
 REM
-REM   nopause  skip the final pause (used by AI automation)
+REM   nopause    skip the final pause (used by AI automation)
+REM   hot-build  keep existing .runtime\libs jars (the server may be running);
+REM              without it, old jars are deleted first, then new ones copied
 REM
 REM Output:
 REM   .runtime\dlqq_mcp_server.jar   (thin jar)
@@ -37,13 +39,24 @@ echo.
 cd /d "%PROJECT_DIR%"
 
 set "NOPAUSE=0"
+set "HOT_BUILD=0"
 :parse
 if "%~1"=="" goto parsed
 if /i "%~1"=="nopause"  ( set "NOPAUSE=1" & shift & goto parse )
 if /i "%~1"=="-nopause" ( set "NOPAUSE=1" & shift & goto parse )
 if /i "%~1"=="/nopause" ( set "NOPAUSE=1" & shift & goto parse )
+if /i "%~1"=="hot-build"  ( set "HOT_BUILD=1" & shift & goto parse )
+if /i "%~1"=="-hot-build" ( set "HOT_BUILD=1" & shift & goto parse )
+if /i "%~1"=="/hot-build" ( set "HOT_BUILD=1" & shift & goto parse )
 shift & goto parse
 :parsed
+
+if "%HOT_BUILD%"=="1" (
+    echo [INFO] Library mode: hot-build - keep existing jars
+) else (
+    echo [INFO] Library mode: clean - delete old jars first
+)
+echo.
 
 set "JAR_NAME=dlqq_mcp_server.jar"
 
@@ -93,15 +106,24 @@ echo [INFO] Copying artifacts to "%RUNTIME_DIR%" ...
 
 if not exist "%RUNTIME_DIR%\libs" mkdir "%RUNTIME_DIR%\libs"
 
-REM Do NOT delete existing jars: the running server may hold them open and a
-REM failed delete spams one error per jar. robocopy overwrites changed jars;
-REM stale jars from removed dependencies are left in place (harmless).
+REM Clean mode (default): delete old jars before copying. The running server
+REM holds loaded jars open, so a clean build requires the server to be stopped.
+REM hot-build skips this deletion and lets robocopy overwrite changed jars.
+if "%HOT_BUILD%"=="0" (
+    echo [INFO] Removing old jars from "%RUNTIME_DIR%\libs" ...
+    del /q "%RUNTIME_DIR%\libs\*.jar" >nul 2>&1
+    if exist "%RUNTIME_DIR%\libs\*.jar" (
+        echo [WARN] Some old jars are still locked and were not deleted.
+        echo [WARN] Stop the running server, or use: build.bat hot-build
+    )
+)
+
 copy /Y "%TARGET_DIR%\%JAR_NAME%" "%RUNTIME_DIR%\%JAR_NAME%" >nul
 if %ERRORLEVEL% neq 0 (
     echo [ERROR] Failed to copy %JAR_NAME%
     echo [ERROR] Source: "%TARGET_DIR%\%JAR_NAME%"
     echo [ERROR] Target: "%RUNTIME_DIR%\%JAR_NAME%"
-    echo [ERROR] Hint: stop the running server if the jar is locked, then retry.
+    echo [ERROR] Hint: stop the running server or use hot-build, then retry.
     call :do_pause
     exit /b 1
 )
@@ -116,6 +138,7 @@ if not exist "%TARGET_DIR%\libs" (
 robocopy "%TARGET_DIR%\libs" "%RUNTIME_DIR%\libs" *.jar /NJH /NJS /NDL /NP /R:1 /W:1 >nul
 if %ERRORLEVEL% GEQ 8 (
     echo [ERROR] Failed to copy dependency jars to "%RUNTIME_DIR%\libs"
+    echo [ERROR] Hint: stop the running server or use hot-build, then retry.
     call :do_pause
     exit /b 1
 )

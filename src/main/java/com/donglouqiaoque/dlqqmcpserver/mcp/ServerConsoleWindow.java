@@ -1,5 +1,13 @@
 package com.donglouqiaoque.dlqqmcpserver.mcp;
 
+import com.donglouqiaoque.dlqqmcpserver.mcp.device.BleDevices;
+import com.donglouqiaoque.dlqqmcpserver.mcp.device.BleTabPanel;
+import com.donglouqiaoque.dlqqmcpserver.mcp.device.UartDevices;
+import com.donglouqiaoque.dlqqmcpserver.mcp.device.UartTabPanel;
+import com.donglouqiaoque.dlqqmcpserver.mcp.device.UsbDevices;
+import com.donglouqiaoque.dlqqmcpserver.mcp.device.UsbTabPanel;
+import com.donglouqiaoque.dlqqmcpserver.mcp.device.WifiTabPanel;
+import com.donglouqiaoque.dlqqmcpserver.mcp.env.EnvTabPanel;
 import com.donglouqiaoque.dlqqmcpserver.mcp.tools.LogoLoader;
 import com.donglouqiaoque.dlqqmcpserver.utils.RuntimeDirs;
 import com.donglouqiaoque.dlqqmcpserver.utils.SessionScope;
@@ -25,6 +33,7 @@ import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTable;
+import javax.swing.JTabbedPane;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
 import javax.swing.KeyStroke;
@@ -111,6 +120,7 @@ public final class ServerConsoleWindow {
     private final JTable table = new JTable(tableModel);
     private final JTextArea infoArea = new JTextArea(4, 20);
 
+    private JTabbedPane tabs;
     private Timer refreshTimer;
     private TrayIcon trayIcon;
     private JDialog trayMenuDialog;
@@ -241,8 +251,18 @@ public final class ServerConsoleWindow {
                 JScrollPane.VERTICAL_SCROLLBAR_NEVER, JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
         infoScroll.setBorder(BorderFactory.createMatteBorder(1, 0, 0, 0, new Color(0x555555)));
 
-        frame.add(tableScroll, BorderLayout.CENTER);
-        frame.add(infoScroll, BorderLayout.SOUTH);
+        JPanel sessionsPanel = new JPanel(new BorderLayout());
+        sessionsPanel.add(tableScroll, BorderLayout.CENTER);
+        sessionsPanel.add(infoScroll, BorderLayout.SOUTH);
+
+        tabs = new JTabbedPane();
+        tabs.addTab("会话管理", sessionsPanel);
+        tabs.addTab("BLE", new BleTabPanel());
+        tabs.addTab("UART", new UartTabPanel());
+        tabs.addTab("USB", new UsbTabPanel());
+        tabs.addTab("WiFi", new WifiTabPanel());
+        tabs.addTab("环境", new EnvTabPanel());
+        frame.add(tabs, BorderLayout.CENTER);
 
         frame.addWindowListener(new WindowAdapter() {
             @Override
@@ -253,6 +273,14 @@ public final class ServerConsoleWindow {
 
         refreshTimer = new Timer(REFRESH_MILLIS, event -> refresh());
         refreshTimer.setInitialDelay(REFRESH_MILLIS);
+    }
+
+    private static JPanel placeholderPanel(String text) {
+        JPanel panel = new JPanel(new BorderLayout());
+        JLabel label = new JLabel(text, SwingConstants.CENTER);
+        label.setForeground(new Color(0x888888));
+        panel.add(label, BorderLayout.CENTER);
+        return panel;
     }
 
     private void show() {
@@ -452,10 +480,18 @@ public final class ServerConsoleWindow {
         hideTrayMenu();
     }
 
-    /** 手动刷新：先结束单元格编辑，避免输入内容被刷新覆盖。 */
+    /** 手动刷新：刷新当前选中选项卡；会话管理页刷新表格，其它页调用各自的 RefreshableTab。 */
     private void refreshManually() {
         if (table.isEditing()) {
             table.getCellEditor().stopCellEditing();
+        }
+        int selectedIndex = tabs == null ? -1 : tabs.getSelectedIndex();
+        if (selectedIndex > 0) {
+            Component component = tabs.getComponentAt(selectedIndex);
+            if (component instanceof RefreshableTab refreshable) {
+                refreshable.refresh();
+                return;
+            }
         }
         refresh();
     }
@@ -852,6 +888,9 @@ public final class ServerConsoleWindow {
             if (refreshTimer != null) {
                 refreshTimer.stop();
             }
+            UartDevices.closeAll();
+            UsbDevices.closeAll();
+            BleDevices.stop();
             disposeTrayMenu();
             if (trayIcon != null) {
                 SystemTray.getSystemTray().remove(trayIcon);

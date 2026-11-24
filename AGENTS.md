@@ -50,9 +50,9 @@
 
 ### Python（BLE 工具）
 
-- **运行时不使用系统 Python**：BLE 工具固定使用随包分发的 `.runtime\python\`（内含解释器、tkinter、Tcl/Tk、bleak、ttkbootstrap、pillow）。
+- **运行时不使用系统 Python**：BLE 工具固定使用随包分发的 `.runtime\python\`（解释器 + bleak）。BLE 的 UI 已由 Java Swing 实现，Python 只作为**无界面 bleak 后端**（`ble_service.py`）：由 Java 以**子进程**启动、通过 **stdin/stdout JSON** 通信，生命周期与 Java 进程一致。
 - 部署时整个 `.runtime\` 目录一起分发；缺少 `python\python.exe` 时 BLE 工具直接报错，不会回退到 PATH 上的 Python；用户可运行 `make_python_env.bat` 重建。
-- 构建期生成 `.runtime\python` 需要本机有一份完整 CPython（3.10+，带 tkinter），仅构建使用。
+- 构建期生成 `.runtime\python` 需要本机有一份完整 CPython（3.10+），仅构建使用。
 
 ## 三、MCP 客户端配置
 
@@ -145,6 +145,7 @@ java -jar dlqq_mcp_server.jar --transport http --port 49129 --path /mcp
 |------|------|------|
 | `script\build.bat` | 仅构建：`mvn clean package -DskipTests` | `target\dlqq_mcp_server.jar`（thin jar）与 `target\libs\` |
 | `script\build_and_copy.bat` | 构建并同步到 `.runtime\` | `.runtime\dlqq_mcp_server.jar`、`.runtime\libs\` |
+| `.runtime\build.bat` | 开发期构建：`[nopause] [hot-build]`；默认先删除 `.runtime\libs` 旧 jar 再复制（需停服），`hot-build` 保留旧库、可在服务运行中构建 | `.runtime\dlqq_mcp_server.jar`、`.runtime\libs\` |
 | `.runtime\make_python_env.bat` | 一键重建项目 Python 环境并安装 bleak / ttkbootstrap / pillow | `.runtime\python\`（约 81 MB） |
 | `.runtime\start-http.bat` | 双击启动 HTTP 服务（用 `java\`、`libs\` 与同目录 jar，启动前询问工作区） | 常驻 HTTP 服务 |
 | `.runtime\install_dlqq_mcp_dsh_client.bat` | 自动安装 DSH 客户端插件 `dlqq-mcp-client`：优先从 Gitee 下载，失败回退 GitHub；安装依赖、注册到 DSH profile（`link:` 依赖 + bundle + 启用补丁） | `%USERPROFILE%\.dsh\plugins\dlqq-mcp-client`，DSH profile 配置更新 |
@@ -186,11 +187,13 @@ src/main/java/com/donglouqiaoque/dlqqmcpserver/
 │   ├── protocol/                   # JsonRpcMessage、McpSchema
 │   ├── server/McpServer.java       # 请求分发 + 工具注册表 + getToolsInfo()
 │   ├── transport/                  # McpTransport 接口、StdioTransport（stdio）、HttpTransport（Streamable HTTP）
-│   └── tools/                      # AITools（注册中心）与各工具实现（含 ImageTools、AboutPanel、LogoLoader、WindowsNativeUtils）
+│   └── tools/                      # AITools（注册中心）、DeviceTools（外设注册）与各工具实现
+├── device/                        # UartDevices/UsbDevices/WifiDevices/BleDevices + 控制台各 Tab 面板
+├── env/                           # EnvTabPanel（环境选项卡：Java/Python 检测、依赖安装、重建）
 └── utils/                          # FileUtils、AIRulesUtils、CalculatorUtils
 src/main/resources/
-├── py/ble_tools.py                 # BLE 图形工具（Python + bleak，Java 通过 Socket 驱动）
-├── image/logo.ico                  # 窗口图标（ICO，供 Python/BLE 使用）
+├── py/ble_service.py               # BLE 无界面后端（bleak + stdin/stdout JSON，Java 子进程）
+├── image/logo.ico                  # 窗口图标（ICO）
 ├── image/logo.png                  # 窗口图标（PNG，LogoLoader 使用）
 └── simplelogger.properties
 ```
@@ -228,6 +231,12 @@ src/main/resources/
 服务端控制台：启动时（有图形环境）**默认隐藏到系统托盘**、不弹出窗口；**单击**托盘图标或托盘菜单
 "显示控制台"打开窗口。菜单栏显示中文名「鸫楼桥鹊MCP服务器控制台」（下拉含隐藏/退出），**中间显示「联系作者：
 https://www.donglouqiaoque.com」并可点击打开默认浏览器**，右侧为刷新按钮（留右边距）；
+**表格上方为选项卡：`会话管理` / `BLE` / `UART` / `USB` / `WiFi` / `环境`**；外设无需单独窗口，所有设备都在对应选项卡
+内以设备列表 + 面板展示与管理（UART 按 COM、USB 按 `VID:PID:bus:address`、BLE 按 MAC、WiFi 按网卡/SSID）。
+`环境` 选项卡展示 Java（版本/供应商/安装目录/JAR/堆内存）与 Python（解释器/版本/pip/bleak）信息，
+并提供打开目录、安装/更新 BLE 依赖、重建 Python 环境（调用 `.runtime\make_python_env.bat`）的入口。
+菜单栏右侧的**刷新按钮刷新"当前选中选项卡"的内容**：会话管理刷新表格；BLE 刷新后端状态/设备列表；UART、USB 重新枚举
+设备；WiFi 刷新网卡与连接状态；环境重新检测 Java/Python 信息。各选项卡内部不再单独提供"刷新"按钮。
 系统标题栏标题文字置空；表格按最后活跃时间倒序展示"活跃会话 + workspace_config.json 中出现过的工作区"两类行
 （列：会话键/工作区/来源/资源权限/操作权限/最后活跃 `yyyy-MM-dd HH:mm:ss`），资源权限/操作权限/最后活跃三列（含表头）居中；
 **工作区（仅会话行）与资源/操作权限可直接双击表格单元格编辑**（工作区单元格带目录选择按钮，权限为下拉选择），
@@ -237,7 +246,7 @@ https://www.donglouqiaoque.com」并可点击打开默认浏览器**，右侧为
 
 ## 六、工具速查
 
-共 **159** 个工具，实现见 `mcp/tools/`，逐个参数说明见 [README.md](README.md)。
+共 **120** 个工具，实现见 `mcp/tools/`，逐个参数说明见 [README.md](README.md)。
 构建/芯片/运行/调试等 13 个项目脚本工具与 13 个脚本路径设置工具已按权限架构**源码屏蔽**，
 `dlqq_test_hot_reload` 同样屏蔽；后台程序管理工具按新命名（`dlqq_kill_command` 等）。
 
@@ -247,10 +256,10 @@ https://www.donglouqiaoque.com」并可点击打开默认浏览器**，右侧为
 | 目录操作 | 8 | mdir、mdirs、树形列出、递归复制等 |
 | 搜索 | 4 | 文件/目录/目录内文本/单文件文本 |
 | 对话框 | 3 | 文本输入、确认、文件选择（Swing） |
-| 串口 UART | 17 | 窗口 + 开关串口 + 收发 + 日志（Python 可选） |
-| BLE | 21 | 蓝牙 20 + 脚本释放 1（Python bleak + Socket） |
-| USB | 15 | usb4java，HID/CDC |
-| WiFi | 12 | netsh / nmcli，Java 原生 |
+| UART | 5 | 控制台选项卡；按 COM 名寻址，多串口并发、收发/日志 |
+| BLE | 10 | 控制台选项卡（Java Swing）；Python 无界面 bleak 后端，按 MAC 寻址 |
+| USB | 5 | 控制台选项卡；usb4java，按 `VID:PID:bus:address` 寻址 |
+| WiFi | 5 | 控制台选项卡；netsh / nmcli，按网卡/SSID 操作 |
 | 鼠标 / 键盘 / 屏幕 | 14 | `java.awt.Robot` 模拟 + `dlqq_capture_screen` |
 | 图片 / Office | 3 | 图片转换、Office 读取与转换 |
 | 时间 / 计算器 | 4 | 时间 1 + 计算器 3 |

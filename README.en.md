@@ -17,10 +17,10 @@ A **Model Context Protocol (MCP) server** written in Java. It provides local too
 - **Binary & BOM** – hex read/write, UTF-8 BOM add/remove
 - **Search** – search files/directories and text inside files, partial match or regex, context lines
 - **Dialogs** – text input, yes/no confirmation, file picker (Swing)
-- **Serial (UART)** – graphical tool for CH340-style USB-to-serial adapters; open/close, send text/hex, read logs
-- **BLE** – scan/connect/discover/read/write/subscribe via Python `bleak` and a local socket
-- **USB** – HID/CDC scan, open, read/write (`usb4java`)
-- **Wi-Fi** – scan/connect/disconnect/status/profiles via `netsh` (Windows) or `nmcli` (Linux)
+- **Serial (UART)** – console tab; multiple COM ports at once, open/close, send text/hex, per-device logs
+- **BLE** – Java Swing panel in the console + headless Python `bleak` backend (JSON over stdin/stdout, child process); scan/connect/discover/read/write/subscribe by MAC
+- **USB** – `usb4java` scan/open/read/write; devices addressed by `VID:PID:bus:address`, embedded in the console
+- **Wi-Fi** – console tab; interfaces/scan/connect/disconnect/status via `netsh` (Windows) or `nmcli` (Linux)
 - **Mouse / keyboard** – `java.awt.Robot`: move, click, drag, scroll, type, hotkeys
 - **Screen & images** – capture the desktop (with the real cursor drawn), convert SVG/PNG/JPG/GIF/BMP
 - **Office & ZIP** – Office → Markdown, Office format conversion, password-protected ZIP, multi-format unzip
@@ -58,7 +58,13 @@ script\build.bat
 
 REM Build and copy to the release folder (recommended)
 script\build_and_copy.bat
+
+REM Development hot build: keep old .runtime\libs jars, usable while the server runs
+.runtime\build.bat nopause hot-build
 ```
+
+- `.runtime\build.bat` without `hot-build`: deletes old `.runtime\libs\*.jar` first, then copies — **stop the server first** (a running server locks the loaded jars);
+- with `hot-build`: keeps old jars and overwrites only changed dependencies, so it can run while the server is running; old jars accumulate, so run a default clean build with the server stopped periodically.
 
 Artifacts:
 
@@ -405,9 +411,15 @@ All runtime data lives in **one directory next to the jar**; no `.dlqq` is creat
 When a graphical environment is available, the console **starts hidden in the system tray** (no window pops up);
 **single-click** the tray icon or use the tray menu "Show console" to open it:
 
+- Tabs below the menu bar: **Sessions / BLE / UART / USB / WiFi / Environment**; peripherals no longer open separate
+  windows — each device is managed in its tab as a device list + panel. The **Environment** tab shows Java
+  (version/vendor/install dir/JAR/heap) and Python (interpreter/version/pip/bleak) and offers buttons to open
+  directories, install/update BLE dependencies, and rebuild the Python environment (via `.runtime\make_python_env.bat`);
 - The menu bar centre shows "联系作者：https://www.donglouqiaoque.com" (click to open the default browser); the
-  "Refresh" button is on its right with a small right margin;
-- The native title bar text is cleared (no window title is shown); the session/workspace table sits right below the menu bar;
+  "Refresh" button is on its right with a small right margin; **the Refresh button refreshes the currently selected tab**:
+  Sessions refreshes the table, BLE refreshes backend status/device lists, UART/USB re-enumerate devices, WiFi refreshes
+  interfaces/connection status, and Environment re-detects Java/Python info; tabs no longer have their own refresh buttons;
+- The native title bar text is cleared (no window title is shown); the session/workspace table is shown on the "Sessions" tab;
 - The table is sorted by **last activity (descending)** and shows two kinds of rows: active sessions, plus workspaces recorded in
   `workspace_config.json` that currently have no active session; columns: session key (workspace rows show "（工作区）"), workspace,
   source (`session cwd (...)`, `server console` or `workspace_config.json`), resource permission, operation permission and last
@@ -580,33 +592,31 @@ All settings live in `<workspace>/.dlqq/settings/settings.properties` (the works
 
 ### Serial (UART)
 
-1. `dlqq_run_uart(port)` opens the GUI for one instance.
-2. `dlqq_uart_get_com` / `dlqq_uart_refresh_com` list ports.
-3. `dlqq_uart_open_com(port, com, baud_rate)` starts capturing.
-4. `dlqq_uart_send_text` / `dlqq_uart_send_hex` write data (also recorded in the buffer).
-5. `dlqq_uart_get_log*` reads with three modes: range (`start_line`/`end_line`), start+count (`start_line`/`line_count`), or wait for new data (`wait_time`/`line_count`, `wait_time` ≤ 30 s).
-6. `dlqq_uart_switch_text_hex` changes the display/return format; `dlqq_exit_uart` closes the instance.
+Peripheral windows now live in the single console window as tabs; tools address devices by name and no longer use instance ports.
+
+1. `dlqq_uart_list` lists COM ports and already-open devices.
+2. `dlqq_uart_open(device="COM3", baud_rate=1000000)` opens the port; multiple ports can be open at the same time.
+3. `dlqq_uart_send(device, data, format=text|hex)` writes data.
+4. `dlqq_uart_get_log(device, lines)` reads the latest log lines; `dlqq_uart_close(device)` closes the device.
 
 ### BLE
 
-1. `.runtime\python` (bundled) provides the interpreter and `bleak`; `dlqq_ble_release_script` extracts `ble_tools.py` to `.dlqq/script/python`.
-2. `dlqq_run_ble(port)` opens the GUI; `dlqq_ble_scan` then `dlqq_ble_get_devices`.
-3. `dlqq_ble_connect(device_address)`, `dlqq_ble_discover`, then read/write/subscribe with service and characteristic UUIDs.
-4. Logs are read with the same three modes as UART; `dlqq_ble_set_buffer_size` controls memory (default 5 MB).
+1. `.runtime\python` (bundled) provides the interpreter and `bleak`. The Python script is a **headless backend** (`ble_service.py`) started by Java as a child process; communication uses newline-delimited JSON over stdin/stdout, and the process exits with the Java process.
+2. The Java Swing BLE panel is embedded in the console; tools address devices by **MAC address**.
+3. `dlqq_ble_scan` then `dlqq_ble_get_devices`; `dlqq_ble_connect(address)`; `dlqq_ble_discover(address)`; read/write/subscribe with characteristic UUIDs.
+4. Multiple BLE devices can be connected by one backend process at the same time.
 
 ### USB
 
-1. `dlqq_run_usb(port)` opens the GUI; `dlqq_usb_scan` returns VID/PID/name.
-2. `dlqq_usb_open(port, vid, pid, type)` opens a HID/CDC device.
-3. `dlqq_usb_send_text` / `dlqq_usb_send_hex` write; `dlqq_usb_get_log*` read (text or hex).
-4. `dlqq_exit_usb` closes the instance.
+1. `dlqq_usb_list` scans devices and returns keys shaped `VID:PID:bus:address`.
+2. `dlqq_usb_open(device)` opens a device; `dlqq_usb_send(device, data, format)` writes to its endpoint.
+3. `dlqq_usb_get_log(device, lines)` reads the log; `dlqq_usb_close(device)` closes the device.
 
 ### Wi-Fi
 
-1. `dlqq_run_wifi(port)` opens the GUI.
-2. `dlqq_wifi_scan` / `dlqq_wifi_get_networks` list networks.
-3. `dlqq_wifi_connect(ssid, password?)`, `dlqq_wifi_disconnect`, `dlqq_wifi_status`, `dlqq_wifi_profiles`.
-4. `dlqq_wifi_get_log` / `dlqq_wifi_clear_log` manage the log buffer.
+1. `dlqq_wifi_interfaces` lists WLAN interfaces; `dlqq_wifi_scan` scans networks; `dlqq_wifi_status` shows the current connection.
+2. `dlqq_wifi_connect(ssid)` connects using an existing system profile; `dlqq_wifi_disconnect` disconnects.
+3. One adapter can be connected to only one network at a time; multiple networks require multiple adapters.
 
 ### Mouse & keyboard
 
@@ -702,95 +712,50 @@ Parameter lists below: `name` = required, `[name]` = optional. Path parameters a
 | `dlqq_dialog_check` | `title`*, `message`* | Yes/No window |
 | `dlqq_dialog_file_path` | `title`*, `[extensions]` | File picker |
 
-### Serial (UART) tools (17)
+### UART tools (5)
 
 | Tool | Parameters | Notes |
 |------|------------|-------|
-| `dlqq_run_uart` | `port`* | Open the GUI; `port` is the local service port |
-| `dlqq_uart_get_com` | `port`* | List serial ports |
-| `dlqq_uart_refresh_com` | `port`* | Refresh the list |
-| `dlqq_uart_open_com` | `port`*, `com`*, `[baud_rate]` | Default baud rate 1000000 |
-| `dlqq_uart_reopen_com` | `port`*, `com`*, `[baud_rate]` | Change baud rate |
-| `dlqq_uart_close_com` | `port`* | Close the channel |
-| `dlqq_uart_send_text` | `port`*, `text`* | Also stored in the buffer |
-| `dlqq_uart_send_hex` | `port`*, `hex_array`* | Each item is even-length hex |
-| `dlqq_uart_get_log` | `port`*, `[start_line]`, `[end_line]`, `[line_count]`, `[wait_time]` | 3 read modes; format follows the text/hex switch |
-| `dlqq_uart_get_log_text` | `port`*, `[start_line]`, `[end_line]`, `[line_count]`, `[wait_time]` | Force text |
-| `dlqq_uart_get_log_hex` | `port`*, `[start_line]`, `[end_line]`, `[line_count]`, `[wait_time]` | Force hex |
-| `dlqq_uart_clear_text` | `port`* | Clear buffer |
-| `dlqq_uart_get_line_count` | `port`* | Buffer line count |
-| `dlqq_uart_set_text_size` | `port`*, `size_bytes`* | Buffer size, default 5 MB |
-| `dlqq_uart_switch_text_hex` | `port`*, `format`* | text / hex |
-| `dlqq_exit_uart` | `port`* | Close window and process |
-| `dlqq_rerun_uart` | `port`* | Restart the tool |
+| `dlqq_uart_list` | none | List COM ports and open devices |
+| `dlqq_uart_open` | `device`*, `[baud_rate]` | Open by COM name; multiple ports at once |
+| `dlqq_uart_close` | `device`* | Close the device |
+| `dlqq_uart_send` | `device`*, `data`*, `[format]` | text / hex |
+| `dlqq_uart_get_log` | `device`*, `[lines]` | Latest log lines |
 
-### BLE script tools
+### BLE tools (10)
 
 | Tool | Parameters | Notes |
 |------|------------|-------|
-| `dlqq_ble_release_script` | none | Release `ble_tools.py` into `.dlqq/script/python` |
+| `dlqq_ble_scan` | `[timeout]` | Scan devices (headless Python backend) |
+| `dlqq_ble_get_devices` | none | Devices from the last scan |
+| `dlqq_ble_connect` | `address`* | Connect by MAC; multiple devices supported |
+| `dlqq_ble_disconnect` | `address`* | Disconnect |
+| `dlqq_ble_discover` | `address`* | Discover services/characteristics |
+| `dlqq_ble_read` | `address`*, `characteristic`* | Read characteristic (returns hex) |
+| `dlqq_ble_write` | `address`*, `characteristic`*, `data`*, `[format]` | text / hex |
+| `dlqq_ble_subscribe` | `address`*, `characteristic`* | Subscribe to notifications |
+| `dlqq_ble_unsubscribe` | `address`*, `characteristic`* | Unsubscribe |
+| `dlqq_ble_get_log` | `[lines]` | Backend log |
 
-### BLE tools (20)
-
-| Tool | Parameters | Notes |
-|------|------------|-------|
-| `dlqq_run_ble` | `port`* | Open the BLE GUI |
-| `dlqq_ble_scan` | `port`*, `[timeout]` | Scan nearby devices |
-| `dlqq_ble_get_devices` | `port`* | Devices from the last scan |
-| `dlqq_ble_connect` | `port`*, `device_address`* | Connect |
-| `dlqq_ble_disconnect` | `port`* | Disconnect |
-| `dlqq_ble_discover` | `port`* | Discover services/characteristics |
-| `dlqq_ble_read` | `port`*, `service_uuid`*, `char_uuid`* | Read characteristic |
-| `dlqq_ble_write_text` | `port`*, `service_uuid`*, `char_uuid`*, `text`* | Write text |
-| `dlqq_ble_write_hex` | `port`*, `service_uuid`*, `char_uuid`*, `hex_array`* | Write hex |
-| `dlqq_ble_subscribe` | `port`*, `service_uuid`*, `char_uuid`*, `enable`* | Subscribe/unsubscribe notifications |
-| `dlqq_ble_get_log` | `port`*, `[start_line]`, `[end_line]`, `[line_count]`, `[wait_time]` | 3 read modes |
-| `dlqq_ble_get_log_text` | `port`*, same as above | Force text |
-| `dlqq_ble_get_log_hex` | `port`*, same as above | Force hex |
-| `dlqq_ble_clear` | `port`* | Clear buffer |
-| `dlqq_ble_get_line_count` | `port`* | Buffer line count |
-| `dlqq_ble_set_buffer_size` | `port`*, `size_bytes`* | Default 5 MB |
-| `dlqq_ble_switch_text_hex` | `port`*, `format`* | text / hex |
-| `dlqq_exit_ble` | `port`* | Close window and process |
-| `dlqq_rerun_ble` | `port`* | Restart the tool |
-| `dlqq_check_bluetooth_open` | none | Check the Windows Bluetooth adapter |
-
-### USB tools (15)
+### USB tools (5)
 
 | Tool | Parameters | Notes |
 |------|------------|-------|
-| `dlqq_run_usb` | `port`* | Open the USB GUI |
-| `dlqq_usb_scan` | `port`* | Scan HID/CDC devices |
-| `dlqq_usb_get_devices` | `port`* | Last scan results |
-| `dlqq_usb_open` | `port`*, `vid`*, `pid`*, `[type]` | Open a device |
-| `dlqq_usb_close` | `port`* | Close |
-| `dlqq_usb_send_text` | `port`*, `text`* | UTF-8 text |
-| `dlqq_usb_send_hex` | `port`*, `hex_array`* | Hex data |
-| `dlqq_usb_get_log` | `port`*, `[start_line]`, `[end_line]` | Format follows the switch |
-| `dlqq_usb_get_log_text` | `port`*, `[start_line]`, `[line_count]` | Force text |
-| `dlqq_usb_get_log_hex` | `port`*, `[start_line]`, `[line_count]` | Force hex |
-| `dlqq_usb_clear` | `port`* | Clear buffer |
-| `dlqq_usb_get_line_count` | `port`* | Buffer line count |
-| `dlqq_usb_switch_text_hex` | `port`* | text / hex |
-| `dlqq_exit_usb` | `port`* | Close window and process |
-| `dlqq_rerun_usb` | `port`* | Restart the tool |
+| `dlqq_usb_list` | none | Scan devices, returns `VID:PID:bus:address` keys |
+| `dlqq_usb_open` | `device`* | Open by device key |
+| `dlqq_usb_close` | `device`* | Close |
+| `dlqq_usb_send` | `device`*, `data`*, `[format]` | text / hex |
+| `dlqq_usb_get_log` | `device`*, `[lines]` | Latest log lines |
 
-### Wi-Fi tools (12)
+### Wi-Fi tools (5)
 
 | Tool | Parameters | Notes |
 |------|------------|-------|
-| `dlqq_run_wifi` | `port`* | Open the Wi-Fi GUI |
-| `dlqq_wifi_scan` | `port`*, `[timeout]` | Scan networks |
-| `dlqq_wifi_get_networks` | `port`* | Last scan results |
-| `dlqq_wifi_connect` | `port`*, `ssid`*, `[password]`, `[timeout]` | WPA/WPA2-PSK or open |
-| `dlqq_wifi_disconnect` | `port`* | Disconnect |
-| `dlqq_wifi_status` | `port`* | Connection state/SSID/signal |
-| `dlqq_wifi_profiles` | `port`* | Saved profiles |
-| `dlqq_wifi_get_log` | `port`*, `[start_line]`, `[end_line]` | Log buffer |
-| `dlqq_wifi_clear_log` | `port`* | Clear log |
-| `dlqq_wifi_get_line_count` | `port`* | Log line count |
-| `dlqq_exit_wifi` | `port`* | Close window |
-| `dlqq_rerun_wifi` | `port`* | Restart the tool |
+| `dlqq_wifi_interfaces` | none | List WLAN interfaces/status |
+| `dlqq_wifi_scan` | none | Scan networks |
+| `dlqq_wifi_status` | none | Current connection status |
+| `dlqq_wifi_connect` | `ssid`* | Connect using an existing profile |
+| `dlqq_wifi_disconnect` | none | Disconnect |
 
 ### Mouse tools (7)
 
@@ -1122,90 +1087,50 @@ Gitignore-style syntax (`*.log`, `build/`, `/config.txt`, `!important.log`, `**/
 | dlqq_clear_pwsh_list | Risky | Safe | Full access |
 | dlqq_refresh_pwsh_list | Safe | Safe | Full access |
 
-#### 4.6 Serial UART (17)
+#### 4.6 UART (5)
 
 | Tool | Resource risk | Peripheral risk | Default visibility |
 |---|---|---|---|
-| dlqq_run_uart | Safe | Risky | Full access |
-| dlqq_rerun_uart | Safe | Risky | Full access |
-| dlqq_exit_uart | Safe | Risky | Full access |
-| dlqq_uart_open_com | Safe | Risky | Full access |
-| dlqq_uart_close_com | Safe | Risky | Full access |
-| dlqq_uart_reopen_com | Safe | Risky | Full access |
-| dlqq_uart_refresh_com | Safe | Safe | Full access |
-| dlqq_uart_get_com | Safe | Safe | Full access |
-| dlqq_uart_send_text | Safe | Risky | Full access |
-| dlqq_uart_send_hex | Safe | Risky | Full access |
+| dlqq_uart_list | Safe | Safe | Full access |
+| dlqq_uart_open | Safe | Risky | Full access |
+| dlqq_uart_close | Safe | Risky | Full access |
+| dlqq_uart_send | Safe | Risky | Full access |
 | dlqq_uart_get_log | Safe | Safe | Full access |
-| dlqq_uart_get_log_text | Safe | Safe | Full access |
-| dlqq_uart_get_log_hex | Safe | Safe | Full access |
-| dlqq_uart_switch_text_hex | Safe | Safe | Full access |
-| dlqq_uart_clear_text | Safe | Safe | Full access |
-| dlqq_uart_get_line_count | Safe | Safe | Full access |
-| dlqq_uart_set_text_size | Safe | Safe | Full access |
 
-#### 4.7 Bluetooth BLE (21)
+#### 4.7 BLE (10)
 
 | Tool | Resource risk | Peripheral risk | Default visibility |
 |---|---|---|---|
-| dlqq_run_ble | Safe | Risky | Full access |
-| dlqq_rerun_ble | Safe | Risky | Full access |
-| dlqq_exit_ble | Safe | Risky | Full access |
 | dlqq_ble_scan | Safe | Risky | Full access |
 | dlqq_ble_get_devices | Safe | Safe | Full access |
 | dlqq_ble_connect | Safe | Risky | Full access |
 | dlqq_ble_disconnect | Safe | Risky | Full access |
 | dlqq_ble_discover | Safe | Risky | Full access |
 | dlqq_ble_read | Safe | Safe | Full access |
-| dlqq_ble_write_text | Safe | Risky | Full access |
-| dlqq_ble_write_hex | Safe | Risky | Full access |
+| dlqq_ble_write | Safe | Risky | Full access |
 | dlqq_ble_subscribe | Safe | Risky | Full access |
+| dlqq_ble_unsubscribe | Safe | Risky | Full access |
 | dlqq_ble_get_log | Safe | Safe | Full access |
-| dlqq_ble_get_log_text | Safe | Safe | Full access |
-| dlqq_ble_get_log_hex | Safe | Safe | Full access |
-| dlqq_ble_switch_text_hex | Safe | Safe | Full access |
-| dlqq_ble_clear | Safe | Safe | Full access |
-| dlqq_ble_get_line_count | Safe | Safe | Full access |
-| dlqq_ble_set_buffer_size | Safe | Safe | Full access |
-| dlqq_ble_release_script | Risky | Safe | Full access |
-| dlqq_check_bluetooth_open | Safe | Safe | Full access |
 
-#### 4.8 USB (15)
+#### 4.8 USB (5)
 
 | Tool | Resource risk | Peripheral risk | Default visibility |
 |---|---|---|---|
-| dlqq_run_usb | Safe | Risky | Full access |
-| dlqq_rerun_usb | Safe | Risky | Full access |
-| dlqq_exit_usb | Safe | Risky | Full access |
-| dlqq_usb_scan | Safe | Risky | Full access |
-| dlqq_usb_get_devices | Safe | Safe | Full access |
+| dlqq_usb_list | Safe | Risky | Full access |
 | dlqq_usb_open | Safe | Risky | Full access |
 | dlqq_usb_close | Safe | Risky | Full access |
-| dlqq_usb_send_text | Safe | Risky | Full access |
-| dlqq_usb_send_hex | Safe | Risky | Full access |
+| dlqq_usb_send | Safe | Risky | Full access |
 | dlqq_usb_get_log | Safe | Safe | Full access |
-| dlqq_usb_get_log_text | Safe | Safe | Full access |
-| dlqq_usb_get_log_hex | Safe | Safe | Full access |
-| dlqq_usb_switch_text_hex | Safe | Safe | Full access |
-| dlqq_usb_clear | Safe | Safe | Full access |
-| dlqq_usb_get_line_count | Safe | Safe | Full access |
 
-#### 4.9 Wi-Fi (12)
+#### 4.9 Wi-Fi (5)
 
 | Tool | Resource risk | Peripheral risk | Default visibility |
 |---|---|---|---|
-| dlqq_run_wifi | Safe | Risky | Full access |
-| dlqq_rerun_wifi | Safe | Risky | Full access |
-| dlqq_exit_wifi | Safe | Risky | Full access |
+| dlqq_wifi_interfaces | Safe | Safe | Full access |
 | dlqq_wifi_scan | Safe | Risky | Full access |
-| dlqq_wifi_get_networks | Safe | Safe | Full access |
+| dlqq_wifi_status | Safe | Safe | Full access |
 | dlqq_wifi_connect | Safe | Risky | Full access |
 | dlqq_wifi_disconnect | Safe | Risky | Full access |
-| dlqq_wifi_status | Safe | Safe | Full access |
-| dlqq_wifi_profiles | Safe | Safe | Full access |
-| dlqq_wifi_get_log | Safe | Safe | Full access |
-| dlqq_wifi_clear_log | Safe | Safe | Full access |
-| dlqq_wifi_get_line_count | Safe | Safe | Full access |
 
 #### 4.10 Mouse / keyboard / screen (14)
 
