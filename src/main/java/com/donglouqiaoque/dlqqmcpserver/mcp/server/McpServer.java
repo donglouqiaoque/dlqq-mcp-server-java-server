@@ -21,6 +21,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -61,6 +62,11 @@ public class McpServer {
     private volatile boolean toolsListRequested = false;
     /** 兜底通知是否已经发送过（只发一次） */
     private volatile boolean fallbackToolsNotificationSent = false;
+
+    /** 正在执行的工具调用数量（JAR 更新时等待最后一个工具调用结束）。 */
+    private final AtomicInteger activeToolCalls = new AtomicInteger();
+    /** 是否已进入重启排水状态：不再接受新的工具调用。 */
+    private volatile boolean draining = false;
 
     public McpServer(String serverName, String serverVersion, McpTransport transport) {
         this.serverName = serverName;
@@ -134,6 +140,24 @@ public class McpServer {
      */
     public int getEnabledToolCount() {
         return toolHandlers.size() - disabledTools.size();
+    }
+
+    /**
+     * 进入重启排水状态：拒绝新的工具调用，等待进行中的调用结束。
+     */
+    public void beginDrain() {
+        draining = true;
+        logger.info("[McpServer] Drain requested, active tool calls: {}", activeToolCalls.get());
+    }
+
+    /** 当前进行中的工具调用数量。 */
+    public int activeToolCallCount() {
+        return activeToolCalls.get();
+    }
+
+    /** 是否已进入排水状态。 */
+    public boolean isDraining() {
+        return draining;
     }
 
     /**
@@ -496,10 +520,52 @@ public class McpServer {
     }
 
     /**
-     * 处理工具调用请求
+     * 处理工具调用请求：登记进行中数量；重启排水期间拒绝新调用并返回错误。
+     *
+     * <p>后台（no_wait）调用不登记、不阻塞重启排水：随进程一起结束。</p>
+     */
+    private void handleToolsCall(JsonRpcMessage.Request request) throws IOException {
+        if (draining) {
+            CallToolResult rejected = new CallToolResult();
+            rejected.setError(true);
+            List<ToolContent> content = new ArrayList<>();
+            content.add(ToolContent.error("服务端正在重启，当前请求未执行，请稍后重试"));
+            rejected.setContent(content);
+            sendResponse(request.getId(), rejected);
+            return;
+        }
+        boolean background = isBackgroundToolCall(request);
+        if (!background) {
+            activeToolCalls.incrementAndGet();
+        }
+        try {
+            doHandleToolsCall(request);
+        } finally {
+            if (!background) {
+                activeToolCalls.decrementAndGet();
+            }
+        }
+    }
+
+    /** 请求是否为后台（no_wait）工具调用：后台调用不阻塞重启排水。 */
+    @SuppressWarnings("unchecked")
+    private boolean isBackgroundToolCall(JsonRpcMessage.Request request) {
+        Map<String, Object> params = request.getParams();
+        if (params == null) {
+            return false;
+        }
+        Object raw = params.get("arguments");
+        if (!(raw instanceof Map<?, ?>)) {
+            return false;
+        }
+        return isBackgroundCall((Map<String, Object>) raw);
+    }
+
+    /**
+     * 工具调用的实际处理。
      */
     @SuppressWarnings("unchecked")
-    private void handleToolsCall(JsonRpcMessage.Request request) throws IOException {
+    private void doHandleToolsCall(JsonRpcMessage.Request request) throws IOException {
         Map<String, Object> params = request.getParams();
         if (params == null) {
             sendErrorResponse(request.getId(), JsonRpcMessage.ERROR_INVALID_PARAMS, "Missing params");

@@ -4586,7 +4586,7 @@ public class AITools {
         Map<String, Object> properties = new HashMap<>();
         Map<String, Object> workspaceProp = new HashMap<>();
         workspaceProp.put("type", "string");
-        workspaceProp.put("description", "要清理的工作区绝对路径（可选）；不传且 all=false 时清理当前会话工作区的缓存");
+        workspaceProp.put("description", "要清理的工作区绝对路径（可选）；不传且 all=false 时清理当前工作区的缓存");
         properties.put("workspace", workspaceProp);
         Map<String, Object> allProp = new HashMap<>();
         allProp.put("type", "boolean");
@@ -4595,7 +4595,7 @@ public class AITools {
         ToolInputSchema inputSchema = new ToolInputSchema(properties, Collections.emptyList());
 
         server.addTool("dlqq_clear_mcp_cache",
-            "清除缓存目录（.dlqq/cache/<工作区hash>/<会话hash>）。可传 workspace 清理指定工作区，或 all=true 清理全部工作区；都不传则清理当前会话缓存。",
+            "清除缓存目录（.dlqq/cache/<工作区hash>，按工作区隔离、不区分会话）。可传 workspace 清理指定工作区，或 all=true 清理全部工作区；都不传则清理当前工作区缓存内容。",
             inputSchema,
             arguments -> {
                 String workspace = arguments != null && arguments.get("workspace") != null
@@ -5132,7 +5132,7 @@ public class AITools {
         ToolInputSchema inputSchema = new ToolInputSchema(properties, Collections.singletonList("file_path"));
 
         server.addTool("dlqq_read_office_file",
-            "读取Office文件（PDF、DOC、DOCX、XLS、XLSX、PPT、PPTX）并转换为Markdown格式。支持分页/分段处理：PDF按页码、Word按段落、Excel按Sheet、PPT按幻灯片。转换后的文件保存在当前会话缓存目录（.dlqq/cache/<工作区>/<会话>），返回Markdown文件路径。",
+            "读取Office文件（PDF、DOC、DOCX、XLS、XLSX、PPT、PPTX）并转换为Markdown格式。支持分页/分段处理：PDF按页码、Word按段落、Excel按Sheet、PPT按幻灯片。转换后的文件保存在当前工作区缓存目录（.dlqq/cache/<工作区>），返回Markdown文件路径。",
             inputSchema,
             arguments -> {
                 String filePath = (String) arguments.get("file_path");

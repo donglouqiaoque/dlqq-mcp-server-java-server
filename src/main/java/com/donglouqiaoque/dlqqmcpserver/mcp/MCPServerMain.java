@@ -1,29 +1,34 @@
 package com.donglouqiaoque.dlqqmcpserver.mcp;
 
+import com.donglouqiaoque.dlqqmcpserver.BuildInfo;
 import com.donglouqiaoque.dlqqmcpserver.mcp.server.McpServer;
 import com.donglouqiaoque.dlqqmcpserver.mcp.tools.AITools;
 import com.donglouqiaoque.dlqqmcpserver.mcp.tools.LogoLoader;
+import com.donglouqiaoque.dlqqmcpserver.mcp.tools.McpTools;
 import com.donglouqiaoque.dlqqmcpserver.mcp.transport.HttpTransport;
 import com.donglouqiaoque.dlqqmcpserver.mcp.transport.McpTransport;
 import com.donglouqiaoque.dlqqmcpserver.mcp.transport.StdioTransport;
-import com.formdev.flatlaf.FlatDarkLaf;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import javax.swing.JOptionPane;
-import javax.swing.SwingUtilities;
-import javax.swing.UIManager;
-import java.awt.GraphicsEnvironment;
-import java.io.IOException;
-import com.donglouqiaoque.dlqqmcpserver.mcp.tools.McpTools;
 import com.donglouqiaoque.dlqqmcpserver.utils.RuntimeDirs;
 import com.donglouqiaoque.dlqqmcpserver.utils.SessionScope;
 import com.donglouqiaoque.dlqqmcpserver.utils.Workspace;
 import com.donglouqiaoque.dlqqmcpserver.utils.WorkspaceRegistry;
+import com.formdev.flatlaf.FlatDarkLaf;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import javax.swing.JDialog;
+import javax.swing.JOptionPane;
+import javax.swing.SwingUtilities;
+import javax.swing.UIManager;
+import java.awt.GraphicsEnvironment;
 import java.io.FileOutputStream;
+import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.jar.Attributes;
+import java.util.jar.JarFile;
+import java.util.jar.Manifest;
 
 /**
  * MCP服务器入口
@@ -65,9 +70,15 @@ public class MCPServerMain {
     private static McpTransport transport;
     private static McpServer server;
 
-    /** 启动时记录的服务器 JAR 修改时间与大小（运行中被替换会导致类懒加载失败，必须主动退出）。 */
+    /** 启动时记录的服务器 JAR 修改时间、大小与清单构建时间（运行中被替换会导致类懒加载失败，必须主动退出）。 */
     private static long jarInitialModified = -1L;
     private static long jarInitialSize = -1L;
+    private static String jarBuildTimeOnDisk = null;
+
+    /** 重启前等待前台工具调用结束的最长时间（毫秒），超时强制退出。 */
+    private static final long TOOL_DRAIN_TIMEOUT_MILLIS = 5_000L;
+    /** 重启提示窗至少保留时间（毫秒），确保用户能看到弹窗。 */
+    private static final long MIN_RESTART_NOTICE_MILLIS = 2_000L;
 
     // 传输方式配置（默认 stdio）
     private static boolean httpMode = false;
@@ -162,7 +173,10 @@ public class MCPServerMain {
 
             // 启动健康检查线程
             startHealthCheckThread();
-            
+
+            // 启动 JAR 替换监视：每 2 秒比对磁盘 JAR 清单构建时间与内存 BuildInfo.BUILD_TIME；
+            // 不一致（或文件被覆盖）说明运行代码已落后，立即退出等待客户端重新拉起进程
+            startJarVersionWatcher();
             // 主线程保持运行
             while (isRunning) {
                 Thread.sleep(1000);
@@ -326,55 +340,169 @@ public class MCPServerMain {
     }
     
     /**
-     * 记录启动时服务器 JAR 的修改时间与大小，用于运行期替换检测。
+     * 记录启动时服务器 JAR 的修改时间、大小与清单构建时间，用于运行期替换检测。
      */
     private static void recordJarBaseline() {
         try {
             Path jar = RuntimeDirs.getServerJar();
             jarInitialModified = Files.getLastModifiedTime(jar).toMillis();
             jarInitialSize = Files.size(jar);
-            logger.info("Server JAR baseline: modified={}, size={}", jarInitialModified, jarInitialSize);
+            jarBuildTimeOnDisk = readBuildTimeFromJar(jar);
+            logger.info("Server JAR baseline: modified={}, size={}, manifest build time={}",
+                    jarInitialModified, jarInitialSize, jarBuildTimeOnDisk);
         } catch (IOException e) {
             logger.warn("Cannot record server JAR baseline: {}", e.getMessage());
         }
     }
 
+    /** 读取 JAR 清单中的 Build-Time 属性（UTC，{@code yyyy-MM-dd HH:mm:ss}）；读取失败返回 null。 */
+    private static String readBuildTimeFromJar(Path jar) {
+        try (JarFile jarFile = new JarFile(jar.toFile())) {
+            Manifest manifest = jarFile.getManifest();
+            if (manifest == null) {
+                return null;
+            }
+            Attributes attributes = manifest.getMainAttributes();
+            return attributes.getValue("Build-Time");
+        } catch (IOException | RuntimeException e) {
+            logger.warn("[JarWatcher] Cannot read manifest build time: {}", e.getMessage());
+            return null;
+        }
+    }
+
     /**
-     * 服务器 JAR 是否已在运行期被替换（修改时间或大小变化）。
+     * 服务器 JAR 是否已在运行期被替换。
+     *
+     * <p>优先比较内存中编译期常量 {@link BuildInfo#BUILD_TIME} 与磁盘 JAR 清单的 Build-Time：
+     * 两者不一致说明磁盘上已是新构建；清单不可读时退回比较修改时间/大小。</p>
      */
-    private static boolean serverJarReplaced() {
+    private static boolean serverJarChanged() {
         if (jarInitialModified < 0) {
             return false;
         }
+        Path jar = RuntimeDirs.getServerJar();
+        String diskBuildTime = readBuildTimeFromJar(jar);
+        if (diskBuildTime != null && !diskBuildTime.equals(BuildInfo.BUILD_TIME)) {
+            logger.warn("[JarWatcher] In-memory build {} differs from JAR manifest build {}",
+                    BuildInfo.BUILD_TIME, diskBuildTime);
+            return true;
+        }
         try {
-            Path jar = RuntimeDirs.getServerJar();
             return Files.getLastModifiedTime(jar).toMillis() != jarInitialModified
                     || Files.size(jar) != jarInitialSize;
         } catch (IOException e) {
-            logger.warn("[HealthCheck] Cannot check server JAR: {}", e.getMessage());
+            logger.warn("[JarWatcher] Cannot check server JAR: {}", e.getMessage());
             return false;
         }
     }
 
     /**
-     * 运行中 JAR 被替换：记录日志、弹窗提示并退出进程。
-     * 继续运行会因类懒加载失败导致请求线程死亡、客户端请求超时，因此必须退出等待重启。
+     * 运行中 JAR 被替换：弹窗提示后等待前台工具调用全部结束，再退出进程；客户端自动重连并拉起新进程。
+     *
+     * <p>规则：期间拒绝新的工具调用；后台（no_wait）调用不等待，直接随进程结束；
+     * 前台调用最多等待 {@link #TOOL_DRAIN_TIMEOUT_MILLIS}（5 秒），超时强制退出；
+     * 提示窗至少保留 {@link #MIN_RESTART_NOTICE_MILLIS}（2 秒），保证用户能看到弹窗。</p>
      */
     private static void exitBecauseServerJarReplaced() {
-        logger.error("[HealthCheck] Server JAR was replaced while running; exiting so the client can restart the server");
+        long noticedAt = System.currentTimeMillis();
+        logger.error("[JarWatcher] Server JAR was replaced or rebuilt; draining foreground tool calls before exit");
+        System.err.println("[dlqq-mcp-server] JAR version changed at runtime; waiting for foreground tool calls to finish.");
+        showRestartNotice("检测到 MCP 服务器 JAR 已被重新构建/覆盖。\n正在等待进行中的工具调用结束（最多 5 秒），随后自动重启并重新连接。");
         isRunning = false;
-        String message = "检测到 MCP 服务器 JAR 已被替换（构建/覆盖），当前进程无法继续加载新代码，即将退出。"
-                + "\n请重新启动 MCP 服务/客户端。";
-        if (!GraphicsEnvironment.isHeadless()) {
-            SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(null, message,
-                    "dlqq-mcp-server", JOptionPane.WARNING_MESSAGE));
+        if (server != null) {
+            server.beginDrain();
         }
-        try {
-            Thread.sleep(3000);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
+        long deadline = noticedAt + TOOL_DRAIN_TIMEOUT_MILLIS;
+        int lastReported = -1;
+        while (System.currentTimeMillis() < deadline) {
+            int active = server == null ? 0 : server.activeToolCallCount();
+            if (active == 0) {
+                break;
+            }
+            if (active != lastReported) {
+                logger.info("[JarWatcher] Waiting for {} foreground tool call(s) to finish before restart", active);
+                lastReported = active;
+            }
+            try {
+                Thread.sleep(200L);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+        int remaining = server == null ? 0 : server.activeToolCallCount();
+        if (remaining > 0) {
+            logger.warn("[JarWatcher] Foreground tool calls still running after {}ms ({} call(s)); forcing exit",
+                    TOOL_DRAIN_TIMEOUT_MILLIS, remaining);
+        } else {
+            logger.info("[JarWatcher] All foreground tool calls finished; exiting after minimum notice time");
+        }
+        // 提示窗至少保留 2 秒：工具在 2 秒内结束则补足到 2 秒；超过 2 秒则按工具实际结束时间退出
+        long elapsed = System.currentTimeMillis() - noticedAt;
+        long holdMillis = MIN_RESTART_NOTICE_MILLIS - elapsed;
+        if (holdMillis > 0) {
+            logger.info("[JarWatcher] Holding restart notice for another {}ms", holdMillis);
+            try {
+                Thread.sleep(holdMillis);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
         }
         System.exit(0);
+    }
+
+    /**
+     * 显示"服务即将自动重启"提示窗（非模态、置顶）。
+     *
+     * <p>无图形环境时直接跳过；弹窗失败不影响重启流程。</p>
+     */
+    private static void showRestartNotice(String message) {
+        if (GraphicsEnvironment.isHeadless()) {
+            return;
+        }
+        SwingUtilities.invokeLater(() -> {
+            try {
+                JOptionPane pane = new JOptionPane(message, JOptionPane.INFORMATION_MESSAGE);
+                JDialog dialog = pane.createDialog(null, "dlqq-mcp-server");
+                dialog.setModal(false);
+                dialog.setAlwaysOnTop(true);
+                dialog.setVisible(true);
+            } catch (RuntimeException e) {
+                logger.warn("[JarWatcher] Cannot show restart notice: {}", e.getMessage());
+            }
+        });
+    }
+
+    /**
+     * JAR 版本监视线程：每 2 秒检查磁盘 JAR 是否被构建/覆盖，变化则退出等待客户端重新连接。
+     */
+    private static void startJarVersionWatcher() {
+        Thread watcher = new Thread(() -> {
+            final long interval = 2000L;
+            logger.info("[JarWatcher] JAR change watcher started, interval={}ms, build={}",
+                    interval, BuildInfo.BUILD_TIME);
+            while (isRunning) {
+                try {
+                    Thread.sleep(interval);
+                    if (!isRunning) {
+                        break;
+                    }
+                    if (serverJarChanged()) {
+                        exitBecauseServerJarReplaced();
+                    }
+                } catch (InterruptedException e) {
+                    logger.warn("[JarWatcher] JAR watcher interrupted");
+                    Thread.currentThread().interrupt();
+                    break;
+                } catch (RuntimeException e) {
+                    logger.warn("[JarWatcher] Watcher check failed: {}", e.getMessage());
+                }
+            }
+            logger.info("[JarWatcher] JAR watcher exited");
+        });
+        watcher.setDaemon(true);
+        watcher.setName("MCP-JarWatcher");
+        watcher.start();
     }
 
     /**
@@ -395,11 +523,6 @@ public class MCPServerMain {
                 try {
                     Thread.sleep(checkInterval);
                     checkCount++;
-
-                    // 运行中 JAR 被替换（构建/覆盖）会破坏类懒加载：主动退出，避免客户端请求永久超时
-                    if (serverJarReplaced()) {
-                        exitBecauseServerJarReplaced();
-                    }
 
                     // 每30秒输出一次内存状态
                     if (System.currentTimeMillis() - lastMemoryLog > 30000) {

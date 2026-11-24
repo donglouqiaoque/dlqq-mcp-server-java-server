@@ -1,11 +1,8 @@
 package com.donglouqiaoque.dlqqmcpserver.utils;
 
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -58,10 +55,6 @@ public final class SessionScope {
     private static final String DEFAULT_WORKSPACE_META_KEY = "dsh/workspace";
     /** 复合会话键最大长度（会话键 + Agent 键）。 */
     private static final int MAX_COMPOSITE_KEY_LENGTH = 512;
-    /** 缓存目录名使用的会话 hash 长度。 */
-    private static final int SESSION_HASH_LENGTH = 16;
-    private static final String HASH_ALGORITHM = "SHA-256";
-
     private static volatile String metaKey = DEFAULT_META_KEY;
     private static volatile String agentMetaKey = DEFAULT_AGENT_META_KEY;
     private static volatile String workspaceMetaKey = DEFAULT_WORKSPACE_META_KEY;
@@ -351,17 +344,9 @@ public final class SessionScope {
     public static String currentWorkspaceHash() {
         return WorkspaceRegistry.hashFor(currentRoot());
     }
-
-    /** 当前会话的会话 hash（用于 cache 第二级目录名）。 */
-    public static String currentSessionHash() {
-        return sha256Hex(currentSessionId()).substring(0, SESSION_HASH_LENGTH);
-    }
-
-    /** 当前会话的缓存目录：{@code <部署>/.dlqq/cache/<工作区hash>/<会话hash>}。 */
+    /** 当前会话的缓存目录：{@code <部署>/.dlqq/cache/<工作区hash>}（按工作区隔离，不再按会话细分）。 */
     public static Path currentCacheDir() {
-        return RuntimeDirs.getCacheRoot()
-                .resolve(currentWorkspaceHash())
-                .resolve(currentSessionHash());
+        return RuntimeDirs.getCacheRoot().resolve(currentWorkspaceHash());
     }
 
     /** 修改当前会话的工作区根目录，并按新工作区重新加载权限。 */
@@ -616,21 +601,6 @@ public final class SessionScope {
             return isUsableWorkspace(path) ? path : null;
         } catch (RuntimeException e) {
             return null;
-        }
-    }
-
-    private static String sha256Hex(String text) {
-        try {
-            MessageDigest digest = MessageDigest.getInstance(HASH_ALGORITHM);
-            byte[] bytes = digest.digest(text.getBytes(StandardCharsets.UTF_8));
-            StringBuilder hex = new StringBuilder(bytes.length * 2);
-            for (byte value : bytes) {
-                hex.append(Character.forDigit((value >> 4) & 0xF, 16));
-                hex.append(Character.forDigit(value & 0xF, 16));
-            }
-            return hex.toString();
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("JVM 不支持 " + HASH_ALGORITHM, e);
         }
     }
 

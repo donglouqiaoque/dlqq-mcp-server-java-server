@@ -93,9 +93,9 @@ echo [INFO] Copying artifacts to "%RUNTIME_DIR%" ...
 
 if not exist "%RUNTIME_DIR%\libs" mkdir "%RUNTIME_DIR%\libs"
 
-REM Remove stale jars so the target reflects the current dependency set
-if exist "%RUNTIME_DIR%\libs\*.jar" del /q "%RUNTIME_DIR%\libs\*.jar"
-
+REM Do NOT delete existing jars: the running server may hold them open and a
+REM failed delete spams one error per jar. robocopy overwrites changed jars;
+REM stale jars from removed dependencies are left in place (harmless).
 copy /Y "%TARGET_DIR%\%JAR_NAME%" "%RUNTIME_DIR%\%JAR_NAME%" >nul
 if %ERRORLEVEL% neq 0 (
     echo [ERROR] Failed to copy %JAR_NAME%

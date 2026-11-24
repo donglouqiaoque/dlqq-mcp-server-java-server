@@ -337,7 +337,7 @@ Levels: `chat` < `readonly` < `approval` < `highrisk` < `full` < `custom`.
 - All sessions pointing at the same workspace share one settings file; switching workspace switches settings and permissions;
 - The legacy `workspace.write.mode` is deprecated: no longer read and removed when the new keys are written;
 - AI can never read or write anything under `.dlqq` at any permission level, except the content inside the current
-  session cache directory (`.dlqq/cache/<workspace hash>/<session hash>/`);
+  workspace cache directory (`.dlqq/cache/<workspace hash>/`, workspace-level only, no per-session split);
 - Permissions can only be changed through `dlqq_workspace_permission_set`
   (`dlqq_set_mcp_properties` rejects permission-related keys).
 
@@ -372,7 +372,7 @@ All runtime data lives in **one directory next to the jar**; no `.dlqq` is creat
 ├── default_workspace/                 # fallback workspace (used when a workspace is unusable)
 └── .dlqq/
     ├── workspace_config.json          # workspace absolute path -> hash mapping
-    ├── cache/<workspace hash>/<session hash>/  # cache (workspace + session levels)
+    ├── cache/<workspace hash>/        # cache (workspace level only, no per-session split)
     ├── data/                          # shared data (BLE scripts, icons, ...)
     ├── log/stdio/<startup time>.log   # one log file per process start, per transport
     ├── log/http/<startup time>.log
@@ -391,9 +391,14 @@ All runtime data lives in **one directory next to the jar**; no `.dlqq` is creat
 - **Protocol discovery**: the MCP 2026-07-28+ `server/discover` probe is supported (advertising compatible
   2025-era protocol versions), so modern clients fall back to the legacy `initialize` handshake instead of
   killing and respawning the process after a failed probe;
-- **JAR replacement detection**: if `dlqq_mcp_server.jar` is rebuilt/overwritten while the server is running,
-  the health check logs an error, shows a dialog and exits the process (continuing would break lazy class
-  loading and make request handling die, leaving client calls hanging); **stop the server before rebuilding**.
+- **JAR replacement watcher (poor-man's hot reload)**: every **2 seconds** while running, the server checks
+  `dlqq_mcp_server.jar` on disk: (1) compares the in-memory compile-time constant `BuildInfo.BUILD_TIME` with the JAR
+  manifest `Build-Time` (build-version match); (2) falls back to file mtime/size. Any difference means the JAR was
+  rebuilt/overwritten, so it **logs an error, shows a topmost notice dialog and rejects new tool calls**; foreground
+  tool calls are awaited for at most **5 s** (forced exit on timeout), while **background (`no_wait`) calls are not
+  waited for and end with the process**; the notice dialog stays visible for **at least 2 s**. The process then exits and
+  the DSH client auto-reconnects and starts a fresh process with the new JAR.
+  **Stopping the server before rebuilding is still recommended**.
 
 ## Server console window
 
@@ -413,6 +418,8 @@ When a graphical environment is available, the console **starts hidden in the sy
   (only session rows can change the workspace; it must be an existing absolute directory and must not be under `.dlqq`; the workspace
   cell has a **directory-picker button** on its right that opens a folder chooser; permissions are chosen from a dropdown);
   changes apply immediately and are written into that workspace's settings, so no separate bottom controls are needed;
+  only an **actual change** of a permission value or the workspace path counts as an operation; merely opening the
+  dropdown/picker and closing it with the original value writes nothing and updates no timestamps;
 - The bottom area shows the deploy directory, runtime directory, current log file, active session count and table row count; long
   paths can be scrolled horizontally to read the full path;
 - **Closing the window does not terminate the process: it hides the console to the system tray**; single-click the tray icon to restore it;

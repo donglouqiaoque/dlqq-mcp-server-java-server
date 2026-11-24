@@ -166,6 +166,7 @@ public final class ServerConsoleWindow {
 
         table.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         table.setRowHeight(26);
+        table.setFillsViewportHeight(true);
         table.setToolTipText("双击“工作区”“资源权限”“操作权限”单元格可直接修改；工作区也可用单元格右侧文件夹图标选择目录");
         table.getTableHeader().setReorderingAllowed(false);
         table.getColumnModel().getColumn(COLUMN_SESSION).setPreferredWidth(240);
@@ -187,16 +188,24 @@ public final class ServerConsoleWindow {
             table.getColumnModel().getColumn(column).setCellRenderer(centeredRenderer);
             table.getColumnModel().getColumn(column).setHeaderRenderer(centeredHeaderRenderer());
         }
-        // 点击表格空白处（没有行的区域）取消当前选中行
+        // 点击表格空白处（无行区域）取消选中；表格未填满视口时点击视口空白区域也取消选中
         table.addMouseListener(new MouseAdapter() {
             @Override
             public void mousePressed(MouseEvent event) {
                 if (!event.isPopupTrigger() && table.rowAtPoint(event.getPoint()) < 0) {
-                    table.clearSelection();
+                    clearTableSelection();
                 }
             }
         });
         JScrollPane tableScroll = new JScrollPane(table);
+        tableScroll.getViewport().addMouseListener(new MouseAdapter() {
+            @Override
+            public void mousePressed(MouseEvent event) {
+                if (!event.isPopupTrigger()) {
+                    clearTableSelection();
+                }
+            }
+        });
 
         infoArea.setEditable(false);
         infoArea.setLineWrap(false);
@@ -517,6 +526,17 @@ public final class ServerConsoleWindow {
         };
     }
 
+    /** 取消表格选中行；若正在编辑单元格，先结束编辑再取消选中。 */
+    private void clearTableSelection() {
+        if (table.isEditing()) {
+            TableCellEditor editor = table.getCellEditor();
+            if (editor != null) {
+                editor.stopCellEditing();
+            }
+        }
+        table.clearSelection();
+    }
+
     /** "最后活跃"格式化：带年月日；无时间（工作区从未产生配置）显示 "-"。 */
     private String formatLastActive(long millis) {
         if (millis <= 0L) {
@@ -751,6 +771,10 @@ public final class ServerConsoleWindow {
                         throw new IllegalArgumentException("工作区不能为空");
                     }
                     Path workspace = Path.of(text).toAbsolutePath().normalize();
+                    Path current = data.workspace() == null ? null : data.workspace().toAbsolutePath().normalize();
+                    if (workspace.equals(current)) {
+                        return; // 值未变化（只是点了一下单元格/目录选择框）：不计为一次操作
+                    }
                     if (!Files.isDirectory(workspace)) {
                         throw new IllegalArgumentException("工作区不是已存在的目录: " + workspace);
                     }
@@ -758,12 +782,18 @@ public final class ServerConsoleWindow {
                         throw new IllegalArgumentException("设置失败：工作区不可用（不能位于 .dlqq 下）");
                     }
                 } else if (column == COLUMN_RESOURCE) {
+                    if (text.equalsIgnoreCase(data.resourcePermission())) {
+                        return; // 只打开了权限下拉框、没有切换选项：不计为一次操作
+                    }
                     if (data.isSession()) {
                         SessionScope.setSessionResourcePermission(data.session.id(), text);
                     } else {
                         Workspace.setPermissionFor(data.workspace(), text);
                     }
                 } else if (column == COLUMN_OPERATION) {
+                    if (text.equalsIgnoreCase(data.operationPermission())) {
+                        return; // 只打开了权限下拉框、没有切换选项：不计为一次操作
+                    }
                     if (data.isSession()) {
                         SessionScope.setSessionOperationPermission(data.session.id(), text);
                     } else {

@@ -220,17 +220,20 @@ immediately. The tool total timeout = approval + execution, default 50 s, overri
 aborted; `no_wait` background calls are unbounded.
 
 Runtime directories (single global location, created on first start): under
-`<jar dir>/.dlqq/` — `workspace_config.json` (path -> hash), `cache/<workspace hash>/<session hash>`
-(cache), `data/` (shared BLE scripts/icons), `log/{stdio,http}/<startup time>.log` (one file per
+`<jar dir>/.dlqq/` — `workspace_config.json` (path -> hash), `cache/<workspace hash>` (cache; workspace level only, no per-session split), `data/` (shared BLE scripts/icons), `log/{stdio,http}/<startup time>.log` (one file per
 start, millisecond-precise timestamp) and `settings/<workspace hash>/settings.properties`; plus the fallback workspace
 `<jar dir>/default_workspace/`. If `.dlqq` or `default_workspace` cannot be created or written,
 startup fails (dialog + stderr + exit code) and no `.dlqq` is written into workspaces. AI can never
-read or write `.dlqq` at any permission level except the content of the current session cache
+read or write `.dlqq` at any permission level except the content of the current workspace cache
 directory; a workspace must never be located under `.dlqq`. The `.dlqq` directory is marked hidden
 (dos:hidden) on Windows after it is created.
-The MCP 2026-07-28+ `server/discover` probe is supported (returns compatible 2025-era protocol versions so the
-client falls back to `initialize`); **stop the server before rebuilding/replacing the JAR**: if the running JAR is
-replaced, the health check shows a dialog and exits the process instead of letting client requests time out.
+client falls back to `initialize`); **JAR replacement watcher (poor-man's hot reload)**: every **2 seconds** the
+running process compares the in-memory `BuildInfo.BUILD_TIME` with the JAR manifest `Build-Time`; on mismatch (or file
+mtime/size change) it logs an English error, shows a topmost notice dialog and **rejects new tool calls**; foreground
+tool calls are awaited for at most **5 s** (forced exit on timeout), **background (`no_wait`) calls are not awaited and
+end with the process**, and the notice dialog stays visible for **at least 2 s**. The process then exits and the DSH
+client auto-reconnects and starts a fresh process with the new JAR. Stopping the server before rebuilding is still
+recommended.
 
 Server console: on startup (with a graphical environment) it **starts hidden in the system tray** with no
 window; **single-click** the tray icon or use the tray menu "Show console" to open it. The menu bar shows the Chinese
@@ -240,7 +243,9 @@ workspaces recorded in `workspace_config.json` (columns: session key/workspace/s
 permission/last activity `yyyy-MM-dd HH:mm:ss`); the resource-permission, operation-permission and last-activity columns
 (headers included) are centre-aligned. **The workspace (session rows only) plus the two permission columns are edited
 directly by double-clicking a table cell** (the workspace cell has a directory picker button; permissions are dropdown
-choices) with immediate effect; clicking an empty table area clears the selection. The bottom area shows deploy dir,
+choices) with immediate effect; only an **actual change** of a permission value or the workspace path counts as an
+operation, while opening the dropdown/picker and closing it with the original value writes nothing and updates no
+timestamps; clicking an empty table area clears the selection. The bottom area shows deploy dir,
 runtime dir, log file, session count and row count (long paths scroll horizontally). Closing the window hides it again;
 only "Exit server" terminates the MCP server process.
 
@@ -270,7 +275,7 @@ new names (`dlqq_kill_command`, ...).
 
 **Dynamic tool management**: `dlqq_mcp_hide_tools` (hide and persist), `dlqq_mcp_show_tools` (restore specific tools), `dlqq_mcp_refresh_tools` (push `notifications/tools/list_changed` only), `dlqq_mcp_reset_tools` (restore everything and clear the config), `dlqq_mcp_run_tools` (call any registered tool by name). Exclusions are stored in `mcp.tools.excluded` (comma separated) in `<jar dir>/.dlqq/settings/<workspace hash>/settings.properties` and survive a server restart; the management tools are protected. In HTTP mode an immediate refresh requires the client to hold an open SSE connection.
 
-**Workspace**: `dlqq_workspace_set` / `dlqq_workspace_get` / `dlqq_workspace_reset` / `dlqq_workspace_permission_set` / `dlqq_get_cwd_path`, plus the `--workspace <dir>` startup argument. The default workspace is the process CWD; when the CWD is unusable or a fallback is needed the server uses `<jar dir>/default_workspace` (the CWD is never a fallback target). **The workspace path is not persisted**. Permissions use two settings: `permission.resource.level` (resource, default chat for a new workspace) and `permission.operation.level` (operation, default chat); the legacy `workspace.write.mode` is gone. All other settings (`script.*`, `response.max.size`, `mcp.tools.excluded`, ...) are persisted in `<jar dir>/.dlqq/settings/<workspace hash>/settings.properties`, and switching the workspace reloads them. Relative paths, script working directories and AI rule bases are resolved against the workspace; cache is isolated as `<jar dir>/.dlqq/cache/<workspace hash>/<session hash>/` and AI may only read/write content inside that session cache directory.
+**Workspace**: `dlqq_workspace_set` / `dlqq_workspace_get` / `dlqq_workspace_reset` / `dlqq_workspace_permission_set` / `dlqq_get_cwd_path`, plus the `--workspace <dir>` startup argument. The default workspace is the process CWD; when the CWD is unusable or a fallback is needed the server uses `<jar dir>/default_workspace` (the CWD is never a fallback target). **The workspace path is not persisted**. Permissions use two settings: `permission.resource.level` (resource, default chat for a new workspace) and `permission.operation.level` (operation, default chat); the legacy `workspace.write.mode` is gone. All other settings (`script.*`, `response.max.size`, `mcp.tools.excluded`, ...) are persisted in `<jar dir>/.dlqq/settings/<workspace hash>/settings.properties`, and switching the workspace reloads them. Relative paths, script working directories and AI rule bases are resolved against the workspace; cache, data and settings are all workspace-scoped (no per-session split) — cache lives at `<jar dir>/.dlqq/cache/<workspace hash>/` and AI may only read/write content inside that workspace cache directory.
 
 **Script tool rules**: `dlqq_build_project` / `dlqq_rebuild_project` / `dlqq_chip_*` / `dlqq_*erase_download` / `dlqq_run_project` / `dlqq_debug_project` and friends have **no built-in default script paths**. When unconfigured they fail with "configure the tool path first" and point at the matching `dlqq_set_*_script`. Settings are written under `script.*` in `<jar dir>/.dlqq/settings/<workspace hash>/settings.properties`.
 

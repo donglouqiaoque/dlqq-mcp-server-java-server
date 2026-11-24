@@ -76,7 +76,7 @@ public class ImageTools {
 
         Map<String, Object> outProp = new HashMap<>();
         outProp.put("type", "string");
-        outProp.put("description", "输出文件路径（可选，默认保存到 .dlqq/cache/<工作区>/<会话> 目录下带时间戳的文件）");
+        outProp.put("description", "输出文件路径（可选，默认保存到 .dlqq/cache/<工作区> 目录下带时间戳的文件）");
         properties.put("output_path", outProp);
 
         Map<String, Object> qualityProp = new HashMap<>();

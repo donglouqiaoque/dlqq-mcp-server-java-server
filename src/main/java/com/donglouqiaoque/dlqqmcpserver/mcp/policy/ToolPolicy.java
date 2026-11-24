@@ -141,10 +141,9 @@ public final class ToolPolicy {
         return isInsideWorkspace(arguments);
     }
 
-    /** 参数中是否包含 .dlqq 路径段。 */
     /**
      * 判定本次调用涉及的 .dlqq 路径：没有任何 .dlqq 路径时返回 null（继续常规权限判定）；
-     * 全部位于当前会话缓存目录内容内时直接允许；其余情况拒绝。
+     * 全部位于当前工作区缓存目录内容内时直接允许；其余情况拒绝。
      */
     private static Result decideDlqqAccess(Map<String, Object> arguments) {
         List<Path> touched = new ArrayList<>();
@@ -161,7 +160,7 @@ public final class ToolPolicy {
             }
             Path normalized = path.toAbsolutePath().normalize();
             if (normalized.equals(cacheDir) || cacheDir.startsWith(normalized)) {
-                return Result.deny("禁止修改缓存目录节点（只能读写当前会话缓存目录内的内容）");
+                return Result.deny("禁止修改缓存目录节点（只能读写当前工作区缓存目录内的内容）");
             }
             if (!normalized.startsWith(cacheDir)) {
                 return Result.deny(DLQQ_DENY_MESSAGE);
@@ -207,7 +206,7 @@ public final class ToolPolicy {
         }
     }
 
-    /** 当前会话缓存目录；未初始化或异常时返回 null（按拒绝处理）。 */
+    /** 当前工作区缓存目录；未初始化或异常时返回 null（按拒绝处理）。 */
     private static Path currentCacheDirOrNull() {
         try {
             return SessionScope.currentCacheDir().toAbsolutePath().normalize();

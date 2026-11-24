@@ -36,7 +36,7 @@ public class ScreenTools {
 
         Map<String, Object> outputProp = new HashMap<>();
         outputProp.put("type", "string");
-        outputProp.put("description", "输出文件路径（可选，支持png/jpg格式，默认保存到 .dlqq/cache/<工作区>/<会话> 目录下带时间戳的文件）");
+        outputProp.put("description", "输出文件路径（可选，支持png/jpg格式，默认保存到 .dlqq/cache/<工作区> 目录下带时间戳的文件）");
         properties.put("output_path", outputProp);
 
         Map<String, Object> xProp = new HashMap<>();
@@ -89,7 +89,7 @@ public class ScreenTools {
                         }
                         target = requested;
                     } else {
-                        // 默认保存到当前会话缓存目录
+                        // 默认保存到当前工作区缓存目录
                         Path cacheDir = SessionScope.currentCacheDir();
                         Files.createDirectories(cacheDir);
                         String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));

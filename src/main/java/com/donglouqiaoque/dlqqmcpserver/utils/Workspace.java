@@ -207,13 +207,13 @@ public final class Workspace {
      */
     public static String checkWrite(Path path) {
         Path absolute = path.toAbsolutePath().normalize();
-        // 当前会话缓存目录内容：始终允许读写（不受权限等级限制）
+        // 当前工作区缓存目录内容：始终允许读写（不受权限等级限制；按工作区隔离，不区分会话）
         if (isCacheContent(absolute)) {
             return null;
         }
         // .dlqq 目录（除缓存目录内容外）一律禁止访问
         if (touchesDlqq(absolute)) {
-            return "✗ 禁止访问 .dlqq 目录（仅当前会话缓存目录内容允许读写）: " + absolute;
+            return "✗ 禁止访问 .dlqq 目录（仅当前工作区缓存目录内容允许读写）: " + absolute;
         }
         switch (getPermission()) {
             case PERMISSION_CHAT:
@@ -541,7 +541,7 @@ public final class Workspace {
         }
     }
 
-    /** 路径是否严格位于当前会话缓存目录内部（缓存目录节点本身不算）。 */
+    /** 路径是否严格位于当前工作区缓存目录内部（缓存目录节点本身不算）。 */
     private static boolean isCacheContent(Path absolute) {
         try {
             Path cacheDir = SessionScope.currentCacheDir().toAbsolutePath().normalize();

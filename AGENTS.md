@@ -215,20 +215,25 @@ src/main/resources/
 可由 `_meta["dlqq/toolTimeoutSeconds"]` 指定；超时立即关闭审批窗口并终止执行；`no_wait` 后台调用不受限。
 
 运行期目录（全局唯一，首次启动自动创建）：`<jar 同级>/.dlqq/` 下的 `workspace_config.json`（路径→hash）、
-`cache/<工作区hash>/<会话hash>`（缓存）、`data/`（BLE 脚本/图标等共享数据）、`log/{stdio,http}/<启动时间>.log`
+`cache/<工作区hash>`（缓存，仅按工作区隔离、不区分会话）、`data/`（BLE 脚本/图标等共享数据）、`log/{stdio,http}/<启动时间>.log`
 （每次启动一个文件，文件名时间精确到毫秒）、`settings/<工作区hash>/settings.properties`；另有兜底工作区 `<jar 同级>/default_workspace/`。
 `.dlqq` 与 `default_workspace` 创建/写入失败时直接启动失败（弹窗 + stderr + 退出码）；不再往工作区写 `.dlqq`。
 `.dlqq` 创建后自动设置为 Windows 隐藏属性（dos:hidden）。
-`.dlqq` 内除当前会话缓存目录内容外，AI 任何权限下都禁止读写；工作区不能位于 `.dlqq` 下。
+`.dlqq` 内除当前工作区缓存目录内容外，AI 任何权限下都禁止读写；工作区不能位于 `.dlqq` 下。
 支持 MCP 2026-07-28+ 客户端的 `server/discover` 探测（返回兼容的 2025 系协议版本，客户端回落 initialize）；
-**构建/替换 JAR 前必须先停止服务**：运行中 JAR 被替换会触发健康检查弹窗并主动退出进程，避免客户端请求超时。
+**JAR 替换监视（变相热加载）**：运行中每 **2 秒**比对内存 `BuildInfo.BUILD_TIME` 与 JAR 清单 `Build-Time`，
+不一致（或 JAR 修改时间/大小变化）即记录英文日志、弹出置顶提示窗，**拒绝新工具调用**；
+前台工具调用最多等待 **5 秒**（超时强制退出），**后台（no_wait）调用不等待、直接随进程结束**；
+提示窗**至少保留 2 秒**；随后进程退出，客户端（DSH）自动重连并拉起新进程加载新 JAR。
+构建/替换 JAR 前仍建议先停止服务。
 
 服务端控制台：启动时（有图形环境）**默认隐藏到系统托盘**、不弹出窗口；**单击**托盘图标或托盘菜单
 "显示控制台"打开窗口。菜单栏显示中文名「鸫楼桥鹊MCP服务器控制台」（下拉含隐藏/退出），右侧为刷新按钮（留右边距）；
 系统标题栏标题文字置空；表格按最后活跃时间倒序展示"活跃会话 + workspace_config.json 中出现过的工作区"两类行
 （列：会话键/工作区/来源/资源权限/操作权限/最后活跃 `yyyy-MM-dd HH:mm:ss`），资源权限/操作权限/最后活跃三列（含表头）居中；
 **工作区（仅会话行）与资源/操作权限可直接双击表格单元格编辑**（工作区单元格带目录选择按钮，权限为下拉选择），
-提交后立即生效；点击表格空白处取消选中；底部显示部署目录/运行时目录/日志文件/会话数与表格行数，长路径可横向滚动；
+提交后立即生效；仅**实际切换/修改**权限值或工作区路径才算一次操作，打开下拉框/目录选择框后以原值关闭不写配置、不更新时间；
+点击表格空白处取消选中；底部显示部署目录/运行时目录/日志文件/会话数与表格行数，长路径可横向滚动；
 点击关闭按钮重新隐藏到托盘，只有"退出服务器"才会终止 MCP 服务器进程。
 
 ## 六、工具速查
@@ -256,7 +261,7 @@ src/main/resources/
 
 **动态工具管理**：`dlqq_mcp_hide_tools`（隐藏并持久化）、`dlqq_mcp_show_tools`（恢复指定工具）、`dlqq_mcp_refresh_tools`（仅推送 `notifications/tools/list_changed`）、`dlqq_mcp_reset_tools`（恢复全部并清空配置）、`dlqq_mcp_run_tools`（按名称直接调用任意已注册工具）。排除项存于 `<jar 同级>/.dlqq/settings/<工作区hash>/settings.properties` 的 `mcp.tools.excluded`（逗号分隔），服务端重启后仍保持隐藏状态；管理工具受保护，不允许被隐藏。HTTP 模式下立即刷新需要客户端已打开 SSE 长连接。
 
-**工作区**：`dlqq_workspace_set` / `dlqq_workspace_get` / `dlqq_workspace_reset` / `dlqq_workspace_permission_set` / `dlqq_get_cwd_path`；启动参数 `--workspace <dir>`。默认工作区 = 进程 CWD，CWD 不可用或需要回退时使用 `<jar 同级>/default_workspace`（CWD 不承担回退职责）。**工作区路径不持久化**。权限分两套配置：`permission.resource.level`（资源权限，新工作区默认 chat）与 `permission.operation.level`（操作权限，默认 chat），旧 `workspace.write.mode` 已废弃；其它配置（`script.*`、`response.max.size`、`mcp.tools.excluded` 等）持久化在 `<jar 同级>/.dlqq/settings/<工作区hash>/settings.properties`，切换工作区自动重载。所有工具的相对路径、脚本执行目录、AI 规则基准都基于工作区解析；缓存按 `<jar 同级>/.dlqq/cache/<工作区hash>/<会话hash>/` 两级隔离，AI 只能读写该会话缓存目录内的内容。
+**工作区**：`dlqq_workspace_set` / `dlqq_workspace_get` / `dlqq_workspace_reset` / `dlqq_workspace_permission_set` / `dlqq_get_cwd_path`；启动参数 `--workspace <dir>`。默认工作区 = 进程 CWD，CWD 不可用或需要回退时使用 `<jar 同级>/default_workspace`（CWD 不承担回退职责）。**工作区路径不持久化**。权限分两套配置：`permission.resource.level`（资源权限，新工作区默认 chat）与 `permission.operation.level`（操作权限，默认 chat），旧 `workspace.write.mode` 已废弃；其它配置（`script.*`、`response.max.size`、`mcp.tools.excluded` 等）持久化在 `<jar 同级>/.dlqq/settings/<工作区hash>/settings.properties`，切换工作区自动重载。所有工具的相对路径、脚本执行目录、AI 规则基准都基于工作区解析；缓存、数据、设置的最小单位都是工作区（不再区分会话），缓存位于 `<jar 同级>/.dlqq/cache/<工作区hash>/`，AI 只能读写该工作区缓存目录内的内容。
 
 **脚本工具规则**：`dlqq_build_project` / `dlqq_rebuild_project` / `dlqq_chip_*` / `dlqq_*erase_download` / `dlqq_run_project` / `dlqq_debug_project` 等**没有任何内置默认脚本路径**；未配置时直接报错“需要先配置工具路径”，并提示对应的 `dlqq_set_*_script`。配置写入 `<jar 同级>/.dlqq/settings/<工作区hash>/settings.properties` 的 `script.*` 项。
 

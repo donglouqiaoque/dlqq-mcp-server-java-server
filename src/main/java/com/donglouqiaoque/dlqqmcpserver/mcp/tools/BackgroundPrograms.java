@@ -165,7 +165,7 @@ final class BackgroundPrograms {
     /** 列出指定 shell 的后台程序（含已结束的） */
     static String list(String shell) {
         StringBuilder sb = new StringBuilder();
-        sb.append("后台程序列表（本会话缓存: ").append(indexFile().getName()).append("）\n");
+        sb.append("后台程序列表（本工作区缓存: ").append(indexFile().getName()).append("）\n");
         sb.append("====================\n\n");
         List<Entry> matched = filter(shell);
         if (matched.isEmpty()) {
@@ -347,7 +347,7 @@ final class BackgroundPrograms {
         return nativeEncoding != null && !nativeEncoding.isEmpty() ? nativeEncoding : "UTF-8";
     }
 
-    /** 把当前登记表写入本会话索引文件 */
+    /** 把当前登记表写入本工作区索引文件 */
     private static synchronized void persist() {
         StringBuilder sb = new StringBuilder();
         for (Entry e : ENTRIES) {
