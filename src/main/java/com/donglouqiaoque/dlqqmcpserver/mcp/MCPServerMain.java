@@ -60,11 +60,6 @@ public class MCPServerMain {
         }
     }
 
-    /** 全局日志目录（{@code <部署目录>/.dlqq/log}）。 */
-    private static Path getLogDir() {
-        return RuntimeDirs.getLogRoot();
-    }
-
     // 全局变量用于健康检查
     private static volatile boolean isRunning = true;
     private static McpTransport transport;

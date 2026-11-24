@@ -63,20 +63,6 @@ public class MouseTools {
         }
     }
 
-    private static int parseButtonNumber(String button) {
-        if (button == null) return MouseEvent.BUTTON1;
-        switch (button.trim().toLowerCase()) {
-            case "right":
-            case "右键":
-                return MouseEvent.BUTTON3;
-            case "middle":
-            case "中键":
-                return MouseEvent.BUTTON2;
-            default:
-                return MouseEvent.BUTTON1;
-        }
-    }
-
     /**
      * 获取鼠标当前位置。
      * 优先使用 Java 的 MouseInfo；失败时回退到 Windows 原生 GetCursorPos（JNA），

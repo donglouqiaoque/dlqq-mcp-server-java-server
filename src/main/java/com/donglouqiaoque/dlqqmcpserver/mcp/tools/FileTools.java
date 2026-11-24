@@ -1,6 +1,5 @@
 package com.donglouqiaoque.dlqqmcpserver.mcp.tools;
 
-import com.donglouqiaoque.dlqqmcpserver.mcp.policy.ToolApprovals;
 import com.donglouqiaoque.dlqqmcpserver.utils.AIRulesUtils;
 import com.donglouqiaoque.dlqqmcpserver.utils.FileAccessGuard;
 import com.donglouqiaoque.dlqqmcpserver.utils.FileUtils;
@@ -122,24 +121,6 @@ public class FileTools {
         String normalizedPath = FileUtils.normalizePath(filePath);
         fileModifiedFlag.remove(normalizedPath);
     }
-    /**
-     * 高危工具专属审批：内置窗口工具直接放行，其余工具弹该工具专属审批窗口。
-     *
-     * @param toolName  工具名（决定窗口标题与内容）
-     * @param keyValues 成对的参数键值（用于审批窗口展示）
-     * @return null 表示允许执行；否则为取消文本
-     */
-    private static String requireToolApproval(String toolName, String... keyValues) {
-        Map<String, Object> arguments = new HashMap<>();
-        for (int i = 0; i + 1 < keyValues.length; i += 2) {
-            arguments.put(keyValues[i], keyValues[i + 1]);
-        }
-        if (ToolApprovals.confirm(toolName, arguments)) {
-            return null;
-        }
-        return ToolApprovals.cancelledMessage(toolName);
-    }
-
     /**
      * 获取当前工作目录（项目目录）
      */
@@ -667,14 +648,6 @@ public class FileTools {
     private static boolean hasFileBom(String filePath) {
         String normalizedPath = FileUtils.normalizePath(filePath);
         return fileBomTracker.getOrDefault(normalizedPath, false);
-    }
-
-    /**
-     * 重置文件的 BOM 记录
-     */
-    private static void resetFileBom(String filePath) {
-        String normalizedPath = FileUtils.normalizePath(filePath);
-        fileBomTracker.remove(normalizedPath);
     }
 
     /**
@@ -1299,7 +1272,7 @@ public class FileTools {
 
         // 弹出确认对话框
         String fileName = path.getFileName().toString();
-        boolean confirmed = DialogTools.showConfirmDialog(
+        boolean confirmed = DialogTools.showApprovalDialog(
                 "确认删除",
                 "确定要删除文件 \"" + fileName + "\" 吗？\n路径: " + path + "\n\n此操作不可恢复！"
         );
@@ -2454,7 +2427,7 @@ public class FileTools {
         }
         message.append("\n此操作不可恢复！");
 
-        boolean confirmed = DialogTools.showConfirmDialog(
+        boolean confirmed = DialogTools.showApprovalDialog(
                 "确认删除目录",
                 message.toString()
         );

@@ -19,7 +19,7 @@
 10. **诊断日志**：`StdioTransport`、`McpServer`、`MCPServerMain` 有详细连接诊断日志，统一输出到 `<jar 同级>/.dlqq/log/<stdio|http>/<启动时间>.log`（每次启动新建一个文件，文件名时间**精确到毫秒** `yyyy-MM-dd_HH-mm-ss-SSS`，logger 与 stderr 合并写入）。
 11. **临时文件位置**：临时文件/中间产物**禁止放 C 盘系统临时目录**，统一放工程根目录下的本地临时工作目录（约定见 `AIRES.md`），按类型分子目录，用完自行清理。
 12. **禁止用脚本批量修改代码**：不允许用 PowerShell / Python / sed / awk 等脚本对源码做批量查找替换或自动改写。所有代码修改必须逐个文件、逐个位置人工确认后用编辑工具完成；确需大范围调整时，先列出清单交由用户确认，再逐项修改。
-13. **禁止使用任何 git 命令**：包括但不限于 `git status`、`git diff`、`git log`、`git checkout/restore/reset`、`git add/commit/push/pull/stash` 等。版本管理由用户本人操作，AI 一律不得执行任何 git 命令（读取与回滚都不允许）。
+13. **禁止使用任何 git 命令（写提交信息前的只读检查除外）**：包括但不限于 `git status`、`git diff`、`git log`、`git checkout/restore/reset`、`git add/commit/push/pull/stash` 等。版本管理由用户本人操作，AI 一律不得执行任何 git 命令（读取与回滚都不允许）。**唯一例外**：用户要求写 git 提交信息时，必须先执行一次只读 git 命令（`git status --short --untracked-files=all`、`git diff --stat`、`git diff --name-status` 等）读取当前差异后再撰写，见规则 29；该例外不允许任何写操作或回滚。
 14. **禁止使用全限定类名**：代码中不得出现 `new java.xxx.XXX()`、`java.util.List` 这类全限定写法。**能 import 的一律在文件顶部 import，然后使用短类名**；只有无法 import 的情况（同名类冲突、需要显式区分同名的不同包类型、静态导入等）才允许写全限定名，并在该处注释说明原因。注释/文档中的类名描述不算代码，但也不建议加包名。
 15. **README 与 AGENTS 中英文必须同步**：修改 [README.md](README.md)（中文）时必须同步修改 [README.en.md](README.en.md)（英文），反之亦然；修改 [AGENTS.md](AGENTS.md) 时必须同步修改 [AGENTS.en.md](AGENTS.en.md)。各语言版本的章节、工具数量、工具说明、配置示例必须保持一致，不允许只改其中一份。
 16. **日志必须 UTF-8 且纯英文**：`.dlqq/log/` 下的日志文件必须使用 **UTF-8** 编码写入；日志内容**只能使用英文**，不得出现中文（包括 `logger.info/warn/error/debug` 的提示文本、异常附加说明）。新增或修改日志时必须写英文。
@@ -35,6 +35,7 @@
 26. **所有文件与命令操作必须走 MCP 通道**：读写文件、修改文本、执行命令、构建发布一律调用本项目的 MCP 工具——读文件用 `dlqq_read_file` / `dlqq_search_text_in_file`，写文件用 `dlqq_create_file` / `dlqq_overwrite_file` / `dlqq_append_file` / `dlqq_replace_text_in_file` / `dlqq_replace_lines_in_file` 等，执行命令用 `dlqq_run_command`，构建用 `dlqq_build_project` / `dlqq_rebuild_project`；不得改用原生 `read`/`write`/`edit` 工具或 pwsh 绕过。MCP 工作区必须指向当前工程目录（`dlqq_workspace_set`）。
 27. **第三方库许可证审查**：新增依赖时优先选择 **MIT** 协议的库。若拟采用非 MIT 协议的库，必须**联网检索**该协议是否允许随本程序一起分发（bundling / redistribution）；确认允许方可引入。若检索结果表明不允许（或无法确认），**必须暂停并向用户说明**该库、版本、协议与限制，由用户决定是否采用，禁止自行添加。
 28. **要改就一次性改完**：用户提出修改需求后，必须把该需求涉及的代码、配置、文档**一次性全部改完再汇报**；**禁止**改到一半以"尚未完成/后续步骤/下一轮继续"收尾，也禁止把本可一次完成的工作拆给用户追问。AI 大模型**无法获取当前上下文占用率**，因此**不存在"上下文空间已满"之类的说法**作为拒绝、缩减或中断修改的理由；只有遇到真实外部限制（权限被拒、工具不可用、必须由用户决策）时才可暂停，并须明确说明具体限制和剩余工作。
+29. **写 git 提交信息前必须先读取 git 差异**：用户要求写提交信息时，禁止凭记忆、上一轮结论或旧提交信息直接编写；必须先执行一次只读 git 命令（建议组合 `git status --short --untracked-files=all`、`git diff --stat`、`git diff --name-status`，必要时只读 `git diff -- <文件>`）确认本次实际改动（新增/修改/删除的文件与关键差异），再按真实差异撰写。该只读检查是规则 13 的唯一例外；检查之外仍禁止任何 git 命令（包括 add/commit/push/checkout/restore/reset/stash 等）。
 
 ## 二、运行环境要求
 

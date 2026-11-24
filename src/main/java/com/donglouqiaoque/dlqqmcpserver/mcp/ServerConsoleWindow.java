@@ -275,14 +275,6 @@ public final class ServerConsoleWindow {
         refreshTimer.setInitialDelay(REFRESH_MILLIS);
     }
 
-    private static JPanel placeholderPanel(String text) {
-        JPanel panel = new JPanel(new BorderLayout());
-        JLabel label = new JLabel(text, SwingConstants.CENTER);
-        label.setForeground(new Color(0x888888));
-        panel.add(label, BorderLayout.CENTER);
-        return panel;
-    }
-
     private void show() {
         refresh();
         frame.setVisible(true);

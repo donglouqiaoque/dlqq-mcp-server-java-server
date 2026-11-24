@@ -13,6 +13,7 @@ import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
@@ -341,6 +342,59 @@ public final class BleDevices {
         } catch (Exception e) {
             System.err.println("[BleDevices] Failed to release backend script: " + e.getMessage());
             return null;
+        }
+    }
+
+    /**
+     * 检查 Windows 电脑的蓝牙适配器是否开启（powershell 查询设备/服务/网卡状态）。
+     */
+    public static String checkBluetoothOpen() {
+        StringBuilder result = new StringBuilder("=== 蓝牙状态检查 ===\n\n");
+        result.append("[1/3] 蓝牙设备状态:\n")
+                .append(runPowerShell("Get-PnpDevice -Class Bluetooth | Select-Object Name, Status, InstanceId | Format-Table -AutoSize"))
+                .append('\n');
+        result.append("[2/3] 蓝牙服务状态:\n")
+                .append(runPowerShell("$s = Get-Service -Name bthserv -ErrorAction SilentlyContinue; "
+                        + "if ($s) { Write-Output ('蓝牙服务状态: ' + $s.Status) } else { Write-Output '未找到蓝牙服务' }"))
+                .append('\n');
+        result.append("[3/3] 蓝牙网络适配器:\n")
+                .append(runPowerShell("$a = Get-NetAdapter | Where-Object {$_.InterfaceDescription -like '*Bluetooth*'}; "
+                        + "if ($a) { Write-Output ('蓝牙适配器: ' + $a.Name + ' - 状态: ' + $a.Status) } else { Write-Output '未找到蓝牙网络适配器' }"))
+                .append('\n');
+        result.append("=== 检查完成 ===\n");
+        result.append("如需开启蓝牙，请手动操作：\n");
+        result.append("1. 任务栏通知图标 → 快速设置 → 点击蓝牙图标开启\n");
+        result.append("2. Win+I → 蓝牙和设备 → 开启蓝牙开关\n");
+        result.append("3. 部分电脑需要按 Fn+功能键开启蓝牙硬件开关\n");
+        return result.toString();
+    }
+
+    private static String runPowerShell(String script) {
+        try {
+            ProcessBuilder builder = new ProcessBuilder("powershell.exe", "-Command", script);
+            builder.redirectErrorStream(true);
+            Process process = builder.start();
+            byte[] bytes = process.getInputStream().readAllBytes();
+            if (!process.waitFor(8, TimeUnit.SECONDS)) {
+                process.destroyForcibly();
+                return "(查询超时)";
+            }
+            return decodeConsole(bytes).trim();
+        } catch (Exception e) {
+            return "(查询失败: " + e.getMessage() + ")";
+        }
+    }
+
+    /** Windows 控制台输出解码：严格 UTF-8 失败时回退 GBK。 */
+    private static String decodeConsole(byte[] bytes) {
+        String utf8 = new String(bytes, StandardCharsets.UTF_8);
+        if (!utf8.contains("\uFFFD")) {
+            return utf8;
+        }
+        try {
+            return new String(bytes, Charset.forName("GBK"));
+        } catch (Exception e) {
+            return utf8;
         }
     }
 
