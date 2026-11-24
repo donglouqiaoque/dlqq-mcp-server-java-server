@@ -385,7 +385,7 @@ All runtime data lives in **one directory next to the jar**; no `.dlqq` is creat
   lengthened on collision);
 - **Startup failure**: if `.dlqq` or `default_workspace` cannot be created or written, startup fails
   (dialog + stderr + exit code); there is no user-directory fallback;
-- **Logs**: one new file per process start, logger and stderr merged, collisions suffixed `-2`, `-3`;
+- **Logs**: one new file per process start; the startup timestamp is **millisecond-precise** (`yyyy-MM-dd_HH-mm-ss-SSS`), logger and stderr merged, with `-2`, `-3` suffixes only if a name still collides;
 - **Cleanup tools**: `dlqq_clear_mcp_cache` accepts `workspace`/`all`; `dlqq_clear_mcp_data` only clears
   cache/data/log and **never deletes settings** (permission config is protected);
 - **Protocol discovery**: the MCP 2026-07-28+ `server/discover` probe is supported (advertising compatible
@@ -402,14 +402,19 @@ When a graphical environment is available, the console **starts hidden in the sy
 
 - The menu bar shows the Chinese app name "鸫楼桥鹊MCP服务器控制台" (its dropdown holds "Hide to tray / Exit server"); the
   "Refresh" button is on its right with a small right margin;
-- The native title bar text is cleared (no window title is shown); the session table sits right below the menu bar;
-- The table lists active sessions: session key, workspace, source, resource permission, operation permission, last activity (refreshed every 2 s);
+- The native title bar text is cleared (no window title is shown); the session/workspace table sits right below the menu bar;
+- The table is sorted by **last activity (descending)** and shows two kinds of rows: active sessions, plus workspaces recorded in
+  `workspace_config.json` that currently have no active session; columns: session key (workspace rows show "（工作区）"), workspace,
+  source (`session cwd (...)`, `server console` or `workspace_config.json`), resource permission, operation permission and last
+  activity (`yyyy-MM-dd HH:mm:ss`, refreshed every 2 s);
+- The **resource permission, operation permission and last-activity columns (headers included) are centre-aligned**; clicking an empty
+  area of the table clears the current selection;
 - **The workspace, resource permission and operation permission columns are edited directly in the table by double-clicking a cell**
-  (the workspace must be an existing absolute directory and must not be under `.dlqq`; the workspace cell has a **directory-picker
-  button** on its right that opens a folder chooser; permissions are chosen from a dropdown);
+  (only session rows can change the workspace; it must be an existing absolute directory and must not be under `.dlqq`; the workspace
+  cell has a **directory-picker button** on its right that opens a folder chooser; permissions are chosen from a dropdown);
   changes apply immediately and are written into that workspace's settings, so no separate bottom controls are needed;
-- The bottom area shows the deploy directory, runtime directory, current log file and active session count; long paths can be
-  scrolled horizontally to read the full path;
+- The bottom area shows the deploy directory, runtime directory, current log file, active session count and table row count; long
+  paths can be scrolled horizontally to read the full path;
 - **Closing the window does not terminate the process: it hides the console to the system tray**; single-click the tray icon to restore it;
 - The tray right-click menu (and the window menu) offers "Show console / Exit server";
 - Only choosing "Exit server" terminates the MCP server process (clients lose the connection);

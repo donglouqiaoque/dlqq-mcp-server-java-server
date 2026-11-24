@@ -4,6 +4,8 @@ import com.donglouqiaoque.dlqqmcpserver.mcp.tools.LogoLoader;
 import com.donglouqiaoque.dlqqmcpserver.utils.RuntimeDirs;
 import com.donglouqiaoque.dlqqmcpserver.utils.SessionScope;
 import com.donglouqiaoque.dlqqmcpserver.utils.SessionScope.SessionInfo;
+import com.donglouqiaoque.dlqqmcpserver.utils.Workspace;
+import com.donglouqiaoque.dlqqmcpserver.utils.WorkspaceRegistry;
 
 import javax.swing.AbstractCellEditor;
 import javax.swing.BorderFactory;
@@ -15,6 +17,7 @@ import javax.swing.JComponent;
 import javax.swing.JDialog;
 import javax.swing.JFileChooser;
 import javax.swing.JFrame;
+import javax.swing.JLabel;
 import javax.swing.JMenu;
 import javax.swing.JMenuBar;
 import javax.swing.JMenuItem;
@@ -32,7 +35,9 @@ import javax.swing.Timer;
 import javax.swing.UIManager;
 import javax.swing.WindowConstants;
 import javax.swing.table.AbstractTableModel;
+import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.TableCellEditor;
+import javax.swing.table.TableCellRenderer;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
@@ -54,13 +59,18 @@ import java.awt.event.MouseEvent;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.io.File;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 /**
  * MCP 服务端控制台窗口。
@@ -89,7 +99,7 @@ public final class ServerConsoleWindow {
     private static final int COLUMN_LAST_ACTIVE = 5;
     private static final String[] RESOURCE_LEVELS = {"chat", "readonly", "workspace", "approval", "highrisk", "full"};
     private static final String[] OPERATION_LEVELS = {"chat", "readonly", "approval", "highrisk", "full"};
-    private static final DateTimeFormatter CLOCK = DateTimeFormatter.ofPattern("HH:mm:ss");
+    private static final DateTimeFormatter CLOCK = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final int REFRESH_MILLIS = 2000;
 
     private static ServerConsoleWindow instance;
@@ -156,19 +166,36 @@ public final class ServerConsoleWindow {
 
         table.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         table.setRowHeight(26);
-        table.setToolTipText("双击“工作区”“资源权限”“操作权限”单元格可直接修改；工作区也可用单元格右侧“...”按钮选择目录");
+        table.setToolTipText("双击“工作区”“资源权限”“操作权限”单元格可直接修改；工作区也可用单元格右侧文件夹图标选择目录");
         table.getTableHeader().setReorderingAllowed(false);
         table.getColumnModel().getColumn(COLUMN_SESSION).setPreferredWidth(240);
         table.getColumnModel().getColumn(COLUMN_WORKSPACE).setPreferredWidth(340);
         table.getColumnModel().getColumn(COLUMN_SOURCE).setPreferredWidth(150);
         table.getColumnModel().getColumn(COLUMN_RESOURCE).setPreferredWidth(120);
         table.getColumnModel().getColumn(COLUMN_OPERATION).setPreferredWidth(120);
-        table.getColumnModel().getColumn(COLUMN_LAST_ACTIVE).setPreferredWidth(90);
+        table.getColumnModel().getColumn(COLUMN_LAST_ACTIVE).setPreferredWidth(150);
         table.getColumnModel().getColumn(COLUMN_WORKSPACE).setCellEditor(new WorkspaceCellEditor());
         table.getColumnModel().getColumn(COLUMN_RESOURCE)
                 .setCellEditor(new DefaultCellEditor(new JComboBox<>(RESOURCE_LEVELS)));
         table.getColumnModel().getColumn(COLUMN_OPERATION)
                 .setCellEditor(new DefaultCellEditor(new JComboBox<>(OPERATION_LEVELS)));
+        // 资源权限 / 操作权限 / 最后活跃：表头与数据单元格都居中对齐
+        DefaultTableCellRenderer centeredRenderer = new DefaultTableCellRenderer();
+        centeredRenderer.setHorizontalAlignment(SwingConstants.CENTER);
+        int[] centeredColumns = {COLUMN_RESOURCE, COLUMN_OPERATION, COLUMN_LAST_ACTIVE};
+        for (int column : centeredColumns) {
+            table.getColumnModel().getColumn(column).setCellRenderer(centeredRenderer);
+            table.getColumnModel().getColumn(column).setHeaderRenderer(centeredHeaderRenderer());
+        }
+        // 点击表格空白处（没有行的区域）取消当前选中行
+        table.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mousePressed(MouseEvent event) {
+                if (!event.isPopupTrigger() && table.rowAtPoint(event.getPoint()) < 0) {
+                    table.clearSelection();
+                }
+            }
+        });
         JScrollPane tableScroll = new JScrollPane(table);
 
         infoArea.setEditable(false);
@@ -399,43 +426,103 @@ public final class ServerConsoleWindow {
         refresh();
     }
 
-    /** 刷新会话表格与底部信息（编辑进行中时跳过，避免打断输入）。 */
+    /** 刷新表格（活跃会话 + workspace_config.json 中登记过的全部工作区）与底部信息。 */
     private void refresh() {
         if (table.isEditing()) {
             return;
         }
-        String selected = selectedSessionId();
+        String selectedKey = selectedRowKey();
         List<SessionInfo> sessions = SessionScope.activeSessions();
-        tableModel.setSessions(sessions);
-        if (selected != null) {
-            selectSession(selected);
+        List<Row> rows = buildRows(sessions);
+        tableModel.setRows(rows);
+        if (selectedKey != null) {
+            selectByKey(selectedKey);
         }
-        infoArea.setText(buildInfoText(sessions.size()));
+        infoArea.setText(buildInfoText(sessions.size(), rows.size()));
         infoArea.setCaretPosition(0);
     }
 
-    /** 底部信息区：部署目录 / 运行时目录 / 日志文件 / 活跃会话数（长路径可横向滚动）。 */
-    private String buildInfoText(int sessionCount) {
+    /** 组装表格行：活跃会话行 + 仅存在于 workspace_config.json 的工作区行，按最后活跃时间倒序。 */
+    private List<Row> buildRows(List<SessionInfo> sessions) {
+        List<Row> rows = new ArrayList<>();
+        Set<String> activeWorkspaces = new HashSet<>();
+        for (SessionInfo session : sessions) {
+            rows.add(Row.forSession(session));
+            if (session.workspace() != null) {
+                activeWorkspaces.add(WorkspaceRegistry.canonicalPathKey(session.workspace()));
+            }
+        }
+        for (Map.Entry<String, String> entry : WorkspaceRegistry.entries().entrySet()) {
+            if (activeWorkspaces.contains(entry.getKey())) {
+                continue;
+            }
+            Path workspace;
+            try {
+                workspace = Path.of(entry.getKey());
+            } catch (RuntimeException e) {
+                continue;
+            }
+            rows.add(Row.forWorkspace(workspace,
+                    Workspace.getPermissionOf(workspace),
+                    Workspace.getOperationPermissionOf(workspace),
+                    settingsLastModified(workspace)));
+        }
+        rows.sort(Comparator.comparingLong(Row::lastActiveMillis).reversed());
+        return rows;
+    }
+
+    /** 工作区 settings.properties 的最后修改时间（无活跃会话工作区的"最后活跃"近似值）。 */
+    private long settingsLastModified(Path workspace) {
+        try {
+            return Files.getLastModifiedTime(Workspace.settingsFileOf(workspace)).toMillis();
+        } catch (IOException | RuntimeException e) {
+            return 0L;
+        }
+    }
+
+    /** 底部信息区：部署目录 / 运行时目录 / 日志文件 / 会话与表格行数（长路径可横向滚动）。 */
+    private String buildInfoText(int sessionCount, int rowCount) {
         String logFile = RuntimeDirs.getCurrentLogFile() == null
                 ? "-" : RuntimeDirs.getCurrentLogFile().toString();
         return "部署目录: " + RuntimeDirs.getAppDir()
                 + "\n运行时目录: " + RuntimeDirs.getRoot()
                 + "\n日志文件: " + logFile
-                + "\n活跃会话: " + sessionCount;
+                + "\n活跃会话: " + sessionCount + "    表格行（会话+工作区）: " + rowCount;
     }
 
-    private String selectedSessionId() {
+    private String selectedRowKey() {
         int row = table.getSelectedRow();
-        return row < 0 ? null : String.valueOf(tableModel.getValueAt(row, COLUMN_SESSION));
+        return row < 0 ? null : tableModel.rowAt(row).key();
     }
 
-    private void selectSession(String sessionId) {
+    private void selectByKey(String key) {
         for (int row = 0; row < tableModel.getRowCount(); row++) {
-            if (sessionId.equals(String.valueOf(tableModel.getValueAt(row, COLUMN_SESSION)))) {
+            if (key.equals(tableModel.rowAt(row).key())) {
                 table.setRowSelectionInterval(row, row);
                 return;
             }
         }
+    }
+
+    /** 生成与默认表头渲染器一致、仅把文字居中的表头渲染器。 */
+    private TableCellRenderer centeredHeaderRenderer() {
+        TableCellRenderer base = table.getTableHeader().getDefaultRenderer();
+        return (table, value, isSelected, hasFocus, row, column) -> {
+            Component component = base.getTableCellRendererComponent(
+                    table, value, isSelected, hasFocus, row, column);
+            if (component instanceof JLabel label) {
+                label.setHorizontalAlignment(SwingConstants.CENTER);
+            }
+            return component;
+        };
+    }
+
+    /** "最后活跃"格式化：带年月日；无时间（工作区从未产生配置）显示 "-"。 */
+    private String formatLastActive(long millis) {
+        if (millis <= 0L) {
+            return "-";
+        }
+        return CLOCK.format(Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault()));
     }
 
     private void showError(String message) {
@@ -510,24 +597,91 @@ public final class ServerConsoleWindow {
         }
     }
 
-    /** 会话表格模型：工作区、资源权限、操作权限三列可直接编辑并立即生效。 */
+    /** 表格行：活跃会话行，或仅存在于 workspace_config.json 的工作区行。 */
+    private static final class Row {
+
+        private final SessionInfo session;
+        private final Path workspace;
+        private final String source;
+        private final String resourcePermission;
+        private final String operationPermission;
+        private final long lastActiveMillis;
+
+        private Row(SessionInfo session, Path workspace, String source,
+                    String resourcePermission, String operationPermission, long lastActiveMillis) {
+            this.session = session;
+            this.workspace = workspace;
+            this.source = source;
+            this.resourcePermission = resourcePermission;
+            this.operationPermission = operationPermission;
+            this.lastActiveMillis = lastActiveMillis;
+        }
+
+        static Row forSession(SessionInfo session) {
+            return new Row(session, session.workspace(), session.source(),
+                    session.resourcePermission(), session.operationPermission(), session.lastAccessMillis());
+        }
+
+        static Row forWorkspace(Path workspace, String resourcePermission,
+                                String operationPermission, long lastActiveMillis) {
+            return new Row(null, workspace, "workspace_config.json",
+                    resourcePermission, operationPermission, lastActiveMillis);
+        }
+
+        boolean isSession() {
+            return session != null;
+        }
+
+        String sessionLabel() {
+            return session == null ? "（工作区）" : session.id();
+        }
+
+        Path workspace() {
+            return workspace;
+        }
+
+        String source() {
+            return source;
+        }
+
+        String resourcePermission() {
+            return resourcePermission;
+        }
+
+        String operationPermission() {
+            return operationPermission;
+        }
+
+        long lastActiveMillis() {
+            return lastActiveMillis;
+        }
+
+        String key() {
+            if (session != null) {
+                return "s:" + session.id();
+            }
+            return "w:" + (workspace == null ? "" : workspace.toString());
+        }
+    }
+
+    /** 表格模型：工作区（仅会话行）与资源/操作权限列可直接编辑并立即生效。 */
     private final class SessionTableModel extends AbstractTableModel {
 
-        private final List<SessionInfo> sessions = new ArrayList<>();
+        private final List<Row> rows = new ArrayList<>();
 
-        void setSessions(List<SessionInfo> newSessions) {
-            sessions.clear();
-            sessions.addAll(newSessions);
+        void setRows(List<Row> newRows) {
+            rows.clear();
+            rows.addAll(newRows);
             fireTableDataChanged();
         }
 
-        SessionInfo sessionAt(int row) {
-            return row < 0 || row >= sessions.size() ? null : sessions.get(row);
+        Row rowAt(int row) {
+            return row < 0 || row >= rows.size() ? null : rows.get(row);
         }
 
         @Override
         public int getRowCount() {
-            return sessions.size();
+            return rows.size();
         }
 
         @Override
@@ -547,29 +701,35 @@ public final class ServerConsoleWindow {
 
         @Override
         public boolean isCellEditable(int row, int column) {
-            return column == COLUMN_WORKSPACE || column == COLUMN_RESOURCE || column == COLUMN_OPERATION;
+            Row data = rowAt(row);
+            if (data == null) {
+                return false;
+            }
+            if (column == COLUMN_RESOURCE || column == COLUMN_OPERATION) {
+                return true;
+            }
+            return column == COLUMN_WORKSPACE && data.isSession();
         }
 
         @Override
         public Object getValueAt(int row, int column) {
-            SessionInfo session = sessionAt(row);
-            if (session == null) {
+            Row data = rowAt(row);
+            if (data == null) {
                 return "";
             }
             switch (column) {
                 case COLUMN_SESSION:
-                    return session.id();
+                    return data.sessionLabel();
                 case COLUMN_WORKSPACE:
-                    return session.workspace() == null ? "" : session.workspace().toString();
+                    return data.workspace() == null ? "" : data.workspace().toString();
                 case COLUMN_SOURCE:
-                    return session.source();
+                    return data.source();
                 case COLUMN_RESOURCE:
-                    return session.resourcePermission();
+                    return data.resourcePermission();
                 case COLUMN_OPERATION:
-                    return session.operationPermission();
+                    return data.operationPermission();
                 case COLUMN_LAST_ACTIVE:
-                    return CLOCK.format(Instant.ofEpochMilli(session.lastAccessMillis())
-                            .atZone(ZoneId.systemDefault()));
+                    return formatLastActive(data.lastActiveMillis());
                 default:
                     return "";
             }
@@ -577,13 +737,16 @@ public final class ServerConsoleWindow {
 
         @Override
         public void setValueAt(Object value, int row, int column) {
-            SessionInfo session = sessionAt(row);
-            if (session == null) {
+            Row data = rowAt(row);
+            if (data == null) {
                 return;
             }
             String text = value == null ? "" : value.toString().trim();
             try {
                 if (column == COLUMN_WORKSPACE) {
+                    if (!data.isSession()) {
+                        throw new IllegalArgumentException("工作区行不能修改工作区路径");
+                    }
                     if (text.isEmpty()) {
                         throw new IllegalArgumentException("工作区不能为空");
                     }
@@ -591,13 +754,21 @@ public final class ServerConsoleWindow {
                     if (!Files.isDirectory(workspace)) {
                         throw new IllegalArgumentException("工作区不是已存在的目录: " + workspace);
                     }
-                    if (!SessionScope.setSessionWorkspace(session.id(), workspace)) {
+                    if (!SessionScope.setSessionWorkspace(data.session.id(), workspace)) {
                         throw new IllegalArgumentException("设置失败：工作区不可用（不能位于 .dlqq 下）");
                     }
                 } else if (column == COLUMN_RESOURCE) {
-                    SessionScope.setSessionResourcePermission(session.id(), text);
+                    if (data.isSession()) {
+                        SessionScope.setSessionResourcePermission(data.session.id(), text);
+                    } else {
+                        Workspace.setPermissionFor(data.workspace(), text);
+                    }
                 } else if (column == COLUMN_OPERATION) {
-                    SessionScope.setSessionOperationPermission(session.id(), text);
+                    if (data.isSession()) {
+                        SessionScope.setSessionOperationPermission(data.session.id(), text);
+                    } else {
+                        Workspace.setOperationPermissionFor(data.workspace(), text);
+                    }
                 }
             } catch (RuntimeException e) {
                 showError("设置失败：" + e.getMessage());

@@ -16,7 +16,7 @@
 7. **Single artifact**: the JAR is always named `dlqq_mcp_server.jar`; `build_and_copy.bat` syncs it to `.runtime\`.
 8. **Manual release storage**: `.release\` is only where the user stores zipped release packages; no script handles it.
 9. **Tool changes must update the docs**: after adding, removing or changing an MCP tool, update [README.en.md](README.en.md) and the tool overview in this file.
-10. **Diagnostic logs**: `StdioTransport`, `McpServer` and `MCPServerMain` write detailed connection diagnostics to `<jar dir>/.dlqq/log/<stdio|http>/<startup time>.log` (a new file per start, logger and stderr merged).
+10. **Diagnostic logs**: `StdioTransport`, `McpServer` and `MCPServerMain` write detailed connection diagnostics to `<jar dir>/.dlqq/log/<stdio|http>/<startup time>.log` (a new file per start; the timestamp in the file name is **millisecond-precise**, `yyyy-MM-dd_HH-mm-ss-SSS`; logger and stderr merged).
 11. **Temporary files**: temporary files and intermediate output **must not go to the system temp directory on drive C**. Put them under the local temporary working directory inside the project root (see `AIRES.md`), grouped by type, and clean them up when done.
 12. **No scripted bulk code edits**: PowerShell / Python / sed / awk and similar tools must not be used to bulk search-replace or rewrite source code. Every code change must be made file by file and location by location with the editing tool; if a large refactor is really needed, list the changes for user approval first, then apply them one by one.
 13. **No git commands whatsoever**: including but not limited to `git status`, `git diff`, `git log`, `git checkout/restore/reset`, `git add/commit/push/pull/stash`. Version control is handled by the user only; the AI must never run any git command (not even for reading or rollback).
@@ -222,11 +222,12 @@ aborted; `no_wait` background calls are unbounded.
 Runtime directories (single global location, created on first start): under
 `<jar dir>/.dlqq/` — `workspace_config.json` (path -> hash), `cache/<workspace hash>/<session hash>`
 (cache), `data/` (shared BLE scripts/icons), `log/{stdio,http}/<startup time>.log` (one file per
-start) and `settings/<workspace hash>/settings.properties`; plus the fallback workspace
+start, millisecond-precise timestamp) and `settings/<workspace hash>/settings.properties`; plus the fallback workspace
 `<jar dir>/default_workspace/`. If `.dlqq` or `default_workspace` cannot be created or written,
 startup fails (dialog + stderr + exit code) and no `.dlqq` is written into workspaces. AI can never
 read or write `.dlqq` at any permission level except the content of the current session cache
-directory; a workspace must never be located under `.dlqq`.
+directory; a workspace must never be located under `.dlqq`. The `.dlqq` directory is marked hidden
+(dos:hidden) on Windows after it is created.
 The MCP 2026-07-28+ `server/discover` probe is supported (returns compatible 2025-era protocol versions so the
 client falls back to `initialize`); **stop the server before rebuilding/replacing the JAR**: if the running JAR is
 replaced, the health check shows a dialog and exits the process instead of letting client requests time out.
@@ -234,11 +235,14 @@ replaced, the health check shows a dialog and exits the process instead of letti
 Server console: on startup (with a graphical environment) it **starts hidden in the system tray** with no
 window; **single-click** the tray icon or use the tray menu "Show console" to open it. The menu bar shows the Chinese
 app name "鸫楼桥鹊MCP服务器控制台" (dropdown: hide/exit) with a Refresh button on its right (small right margin); the
-native title bar text is cleared. The table lists active sessions (key/workspace/source/resource permission/operation
-permission/last activity) and **workspace plus the two permission columns are edited directly by double-clicking a
-table cell** (the workspace cell has a directory picker button; permissions are dropdown choices) with immediate effect.
-The bottom area shows deploy dir, runtime dir, log file and session count (long paths scroll horizontally). Closing the
-window hides it again; only "Exit server" terminates the MCP server process.
+native title bar text is cleared. The table is sorted by last activity (descending) and shows active sessions plus
+workspaces recorded in `workspace_config.json` (columns: session key/workspace/source/resource permission/operation
+permission/last activity `yyyy-MM-dd HH:mm:ss`); the resource-permission, operation-permission and last-activity columns
+(headers included) are centre-aligned. **The workspace (session rows only) plus the two permission columns are edited
+directly by double-clicking a table cell** (the workspace cell has a directory picker button; permissions are dropdown
+choices) with immediate effect; clicking an empty table area clears the selection. The bottom area shows deploy dir,
+runtime dir, log file, session count and row count (long paths scroll horizontally). Closing the window hides it again;
+only "Exit server" terminates the MCP server process.
 
 ## 6. Tool overview
 

@@ -5,6 +5,7 @@ import javax.swing.SwingUtilities;
 import java.awt.GraphicsEnvironment;
 import java.io.IOException;
 import java.net.URL;
+import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -33,7 +34,7 @@ public final class RuntimeDirs {
     public static final String DEFAULT_WORKSPACE_NAME = "default_workspace";
 
     private static final DateTimeFormatter LOG_TIME_FORMAT =
-            DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss");
+            DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss-SSS");
     private static final String GIT_IGNORE_CONTENT = "*\n";
     private static final String WRITE_PROBE_PREFIX = ".write-probe-";
 
@@ -66,6 +67,7 @@ public final class RuntimeDirs {
             createDirectories(root.resolve("log"));
             createDirectories(root.resolve("settings"));
             ensureGitIgnore(root);
+            hideDirectory(root);
             createDirectories(workspace);
             if (!Files.isDirectory(workspace)) {
                 throw new IOException("默认工作区不是目录");
@@ -81,7 +83,10 @@ public final class RuntimeDirs {
 
     /**
      * 为本次进程创建日志文件：{@code <root>/log/<transport>/<启动时间>.log}。
-     * 同一秒多次启动时依次追加 {@code -2}、{@code -3} 后缀。
+     *
+     * <p>启动时间精确到毫秒（{@code yyyy-MM-dd_HH-mm-ss-SSS}），避免同一秒内启动的多个进程
+     * （如 MCP 客户端的版本探测子进程与正式连接进程）文件名完全相同只能靠 {@code -2} 区分；
+     * 万一仍重名，再依次追加 {@code -2}、{@code -3} 后缀。</p>
      *
      * @param transport 传输方式（stdio / http），空值按 stdio 处理
      * @return 新建的日志文件绝对路径
@@ -224,6 +229,22 @@ public final class RuntimeDirs {
         } catch (IOException e) {
             // 仅用于忽略运行时数据，失败不影响启动
             System.err.println("[RuntimeDirs] 创建 .gitignore 失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 将运行时目录标记为隐藏（Windows 下设置 DOS hidden 属性）。
+     *
+     * <p>.dlqq 目录默认隐藏，避免在部署目录里看到大量运行时文件；设置失败只记录，不影响启动。</p>
+     */
+    private static void hideDirectory(Path dir) {
+        try {
+            if (!FileSystems.getDefault().supportedFileAttributeViews().contains("dos")) {
+                return;
+            }
+            Files.setAttribute(dir, "dos:hidden", Boolean.TRUE);
+        } catch (IOException | RuntimeException e) {
+            System.err.println("[RuntimeDirs] 设置隐藏属性失败: " + dir + " (" + e.getMessage() + ")");
         }
     }
 
