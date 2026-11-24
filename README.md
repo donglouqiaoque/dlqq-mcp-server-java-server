@@ -2491,9 +2491,6 @@ src/main/java/com/donglouqiaoque/dlqqmcpserver/
 │       ├── McpTransport.java      # 传输层接口
 │       ├── StdioTransport.java    # stdio传输实现
 │       └── HttpTransport.java     # Streamable HTTP 传输实现
-├── cli/                           # 命令行解析（历史保留）
-├── config/
-│   └── ConfigManager.java         # 旧配置管理器
 └── utils/
     ├── FileUtils.java             # 路径/文件工具
     ├── AIRulesUtils.java          # .aiignore/.aiwriterules/.aireadrules
@@ -2913,7 +2910,8 @@ settings.json
 服务启动后（有图形环境时）控制台**默认隐藏到系统托盘**，不弹出窗口；**单击**托盘图标或托盘菜单"显示控制台"可打开：
 
 - 窗口菜单栏显示中文名「鸫楼桥鹊MCP服务器控制台」（下拉含"隐藏到托盘 / 退出服务器"），右侧为「刷新」按钮（靠右留出间距）；
-- 系统标题栏中间的标题文字已置空（不显示窗口标题）；菜单栏下方为会话/工作区表格；
+- 系统标题栏中间的标题文字已置空（不显示窗口标题）；菜单栏**中间显示「联系作者：https://www.donglouqiaoque.com」**
+  （可点击，打开默认浏览器）；菜单栏下方为会话/工作区表格；
 - 表格按**最后活跃时间倒序**展示两类行：活跃会话行，以及 `workspace_config.json` 中出现过但当前无活跃会话的工作区行；
   列包括：会话键（工作区行显示"（工作区）"）、工作区、来源（`session cwd (...)` / `server console` / `workspace_config.json`）、
   资源权限、操作权限、最后活跃（`yyyy-MM-dd HH:mm:ss`，每 2 秒自动刷新）；

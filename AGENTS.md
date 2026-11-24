@@ -187,8 +187,6 @@ src/main/java/com/donglouqiaoque/dlqqmcpserver/
 │   ├── server/McpServer.java       # 请求分发 + 工具注册表 + getToolsInfo()
 │   ├── transport/                  # McpTransport 接口、StdioTransport（stdio）、HttpTransport（Streamable HTTP）
 │   └── tools/                      # AITools（注册中心）与各工具实现（含 ImageTools、AboutPanel、LogoLoader、WindowsNativeUtils）
-├── cli/                            # 命令行解析（历史保留，主程序不走这里）
-├── config/ConfigManager.java       # 旧配置（~/.dlqq-mcp-server，历史保留）
 └── utils/                          # FileUtils、AIRulesUtils、CalculatorUtils
 src/main/resources/
 ├── py/ble_tools.py                 # BLE 图形工具（Python + bleak，Java 通过 Socket 驱动）
@@ -228,7 +226,8 @@ src/main/resources/
 构建/替换 JAR 前仍建议先停止服务。
 
 服务端控制台：启动时（有图形环境）**默认隐藏到系统托盘**、不弹出窗口；**单击**托盘图标或托盘菜单
-"显示控制台"打开窗口。菜单栏显示中文名「鸫楼桥鹊MCP服务器控制台」（下拉含隐藏/退出），右侧为刷新按钮（留右边距）；
+"显示控制台"打开窗口。菜单栏显示中文名「鸫楼桥鹊MCP服务器控制台」（下拉含隐藏/退出），**中间显示「联系作者：
+https://www.donglouqiaoque.com」并可点击打开默认浏览器**，右侧为刷新按钮（留右边距）；
 系统标题栏标题文字置空；表格按最后活跃时间倒序展示"活跃会话 + workspace_config.json 中出现过的工作区"两类行
 （列：会话键/工作区/来源/资源权限/操作权限/最后活跃 `yyyy-MM-dd HH:mm:ss`），资源权限/操作权限/最后活跃三列（含表头）居中；
 **工作区（仅会话行）与资源/操作权限可直接双击表格单元格编辑**（工作区单元格带目录选择按钮，权限为下拉选择），

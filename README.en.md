@@ -405,7 +405,7 @@ All runtime data lives in **one directory next to the jar**; no `.dlqq` is creat
 When a graphical environment is available, the console **starts hidden in the system tray** (no window pops up);
 **single-click** the tray icon or use the tray menu "Show console" to open it:
 
-- The menu bar shows the Chinese app name "鸫楼桥鹊MCP服务器控制台" (its dropdown holds "Hide to tray / Exit server"); the
+- The menu bar centre shows "联系作者：https://www.donglouqiaoque.com" (click to open the default browser); the
   "Refresh" button is on its right with a small right margin;
 - The native title bar text is cleared (no window title is shown); the session/workspace table sits right below the menu bar;
 - The table is sorted by **last activity (descending)** and shows two kinds of rows: active sessions, plus workspaces recorded in
@@ -947,8 +947,6 @@ src/main/java/com/donglouqiaoque/dlqqmcpserver/
 │   ├── server/McpServer.java     # dispatch + tool registry + dynamic tools
 │   ├── transport/                # McpTransport, StdioTransport, HttpTransport (SSE)
 │   └── tools/                    # AITools + all tool implementations
-├── cli/                          # legacy CLI parsing
-├── config/ConfigManager.java     # legacy configuration
 └── utils/                        # FileUtils, AIRulesUtils, CalculatorUtils, Workspace
 src/main/resources/
 ├── py/ble_tools.py               # BLE GUI (Python + bleak)

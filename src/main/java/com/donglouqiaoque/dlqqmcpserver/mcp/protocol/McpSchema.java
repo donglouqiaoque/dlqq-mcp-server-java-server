@@ -203,37 +203,6 @@ public class McpSchema {
         public CompletionsCapability() {}
     }
 
-    // 初始化请求
-    public static class InitializeRequest {
-        private String protocolVersion;
-        private Capabilities capabilities;
-        private ClientInfo clientInfo;
-
-        public String getProtocolVersion() {
-            return protocolVersion;
-        }
-
-        public void setProtocolVersion(String protocolVersion) {
-            this.protocolVersion = protocolVersion;
-        }
-
-        public Capabilities getCapabilities() {
-            return capabilities;
-        }
-
-        public void setCapabilities(Capabilities capabilities) {
-            this.capabilities = capabilities;
-        }
-
-        public ClientInfo getClientInfo() {
-            return clientInfo;
-        }
-
-        public void setClientInfo(ClientInfo clientInfo) {
-            this.clientInfo = clientInfo;
-        }
-    }
-
     // 客户端信息 - 2025-11-25协议更新
     public static class ClientInfo {
         private String name;
@@ -534,28 +503,6 @@ public class McpSchema {
 
         public void setTools(List<Tool> tools) {
             this.tools = tools;
-        }
-    }
-
-    // 调用工具请求
-    public static class CallToolRequest {
-        private String name;
-        private Map<String, Object> arguments;
-
-        public String getName() {
-            return name;
-        }
-
-        public void setName(String name) {
-            this.name = name;
-        }
-
-        public Map<String, Object> getArguments() {
-            return arguments;
-        }
-
-        public void setArguments(Map<String, Object> arguments) {
-            this.arguments = arguments;
         }
     }
 

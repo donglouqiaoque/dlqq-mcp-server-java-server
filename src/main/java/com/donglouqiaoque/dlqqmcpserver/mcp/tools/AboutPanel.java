@@ -34,7 +34,7 @@ final class AboutPanel {
     /** 作者名称 */
     static final String AUTHOR = "鸫楼桥鹊";
     /** 联系作者网址 */
-    static final String WEBSITE = "http://www.donglouqiaoque.com";
+    static final String WEBSITE = "https://www.donglouqiaoque.com";
 
     private AboutPanel() {
     }
@@ -65,7 +65,7 @@ final class AboutPanel {
         authorPanel.add(versionLabel);
 
         // 联系作者（可点击链接，打开默认浏览器）
-        JLabel linkLabel = new JLabel("<html><u>联系作者：www.donglouqiaoque.com</u></html>");
+        JLabel linkLabel = new JLabel("<html><u>联系作者：" + WEBSITE + "</u></html>");
         linkLabel.setFont(new Font("Microsoft YaHei", Font.PLAIN, 11));
         linkLabel.setForeground(new Color(0, 102, 204));
         linkLabel.setCursor(new Cursor(Cursor.HAND_CURSOR));
@@ -73,9 +73,11 @@ final class AboutPanel {
             @Override
             public void mouseClicked(MouseEvent e) {
                 try {
-                    if (Desktop.isDesktopSupported()) {
-                        Desktop.getDesktop().browse(new URI(WEBSITE));
+                    if (!Desktop.isDesktopSupported()
+                            || !Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
+                        throw new IllegalStateException("当前系统不支持打开默认浏览器");
                     }
+                    Desktop.getDesktop().browse(new URI(WEBSITE));
                 } catch (Exception ex) {
                     if (owner != null) {
                         JOptionPane.showMessageDialog(owner, "无法打开浏览器：" + ex.getMessage(),

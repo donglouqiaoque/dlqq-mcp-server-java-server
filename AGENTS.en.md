@@ -186,8 +186,6 @@ src/main/java/com/donglouqiaoque/dlqqmcpserver/
 │   ├── server/McpServer.java       # request dispatch + tool registry + getToolsInfo()
 │   ├── transport/                  # McpTransport, StdioTransport (stdio), HttpTransport (Streamable HTTP)
 │   └── tools/                      # AITools (registry) and tool implementations (ImageTools, AboutPanel, LogoLoader, WindowsNativeUtils, ...)
-├── cli/                            # command-line parsing (legacy, not used by the main program)
-├── config/ConfigManager.java       # legacy config (~/.dlqq-mcp-server, kept for history)
 └── utils/                          # FileUtils, AIRulesUtils, CalculatorUtils
 src/main/resources/
 ├── py/ble_tools.py                 # BLE GUI tool (Python + bleak, driven by Java over a socket)
@@ -237,7 +235,8 @@ recommended.
 
 Server console: on startup (with a graphical environment) it **starts hidden in the system tray** with no
 window; **single-click** the tray icon or use the tray menu "Show console" to open it. The menu bar shows the Chinese
-app name "鸫楼桥鹊MCP服务器控制台" (dropdown: hide/exit) with a Refresh button on its right (small right margin); the
+app name "鸫楼桥鹊MCP服务器控制台" (dropdown: hide/exit) with "联系作者：https://www.donglouqiaoque.com" in its
+centre (clickable, opens the default browser) and a Refresh button on its right (small right margin); the
 native title bar text is cleared. The table is sorted by last activity (descending) and shows active sessions plus
 workspaces recorded in `workspace_config.json` (columns: session key/workspace/source/resource permission/operation
 permission/last activity `yyyy-MM-dd HH:mm:ss`); the resource-permission, operation-permission and last-activity columns

@@ -214,12 +214,12 @@ class BleGuiTool:
                                      font=('Consolas', 9), bootstyle="secondary")
         ble_version_label.pack(side=tk.LEFT, padx=20)
 
-        # 联系作者（可点击链接）
+        # 联系作者（可点击链接，打开默认浏览器）
         def open_website(event):
             import webbrowser
-            webbrowser.open("http://www.donglouqiaoque.com")
+            webbrowser.open("https://www.donglouqiaoque.com")
 
-        link_label = tb.Label(author_frame, text="联系作者：www.donglouqiaoque.com",
+        link_label = tb.Label(author_frame, text="联系作者：https://www.donglouqiaoque.com",
                               font=('Microsoft YaHei', 9, 'underline'),
                               bootstyle="info", cursor="hand2")
         link_label.pack(side=tk.LEFT, padx=20)

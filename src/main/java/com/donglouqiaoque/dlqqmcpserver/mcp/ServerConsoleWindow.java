@@ -42,6 +42,7 @@ import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Cursor;
+import java.awt.Desktop;
 import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.GraphicsEnvironment;
@@ -60,6 +61,7 @@ import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.io.File;
 import java.io.IOException;
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
@@ -156,6 +158,29 @@ public final class ServerConsoleWindow {
         appMenu.addSeparator();
         appMenu.add(exitItem);
         menuBar.add(appMenu);
+        JLabel contactLabel = new JLabel("联系作者：https://www.donglouqiaoque.com");
+        contactLabel.setFont(contactLabel.getFont().deriveFont(Font.PLAIN, 12F));
+        contactLabel.setForeground(new Color(0xD6, 0xD6, 0xD6));
+        contactLabel.setCursor(new Cursor(Cursor.HAND_CURSOR));
+        contactLabel.setToolTipText("点击打开默认浏览器访问作者网站");
+        contactLabel.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent event) {
+                openAuthorWebsite();
+            }
+
+            @Override
+            public void mouseEntered(MouseEvent event) {
+                contactLabel.setForeground(new Color(0xFFFFFF));
+            }
+
+            @Override
+            public void mouseExited(MouseEvent event) {
+                contactLabel.setForeground(new Color(0xD6, 0xD6, 0xD6));
+            }
+        });
+        menuBar.add(Box.createHorizontalGlue());
+        menuBar.add(contactLabel);
         menuBar.add(Box.createHorizontalGlue());
         JButton refreshButton = new JButton("刷新");
         refreshButton.setFocusable(false);
@@ -547,6 +572,20 @@ public final class ServerConsoleWindow {
 
     private void showError(String message) {
         JOptionPane.showMessageDialog(frame, message, TITLE, JOptionPane.WARNING_MESSAGE);
+    }
+
+    /** 打开作者网站（默认浏览器）；失败时弹窗提示。 */
+    private void openAuthorWebsite() {
+        final String website = "https://www.donglouqiaoque.com";
+        try {
+            if (!Desktop.isDesktopSupported()
+                    || !Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
+                throw new IllegalStateException("当前系统不支持打开默认浏览器");
+            }
+            Desktop.getDesktop().browse(new URI(website));
+        } catch (Exception e) {
+            showError("无法打开浏览器：" + e.getMessage());
+        }
     }
 
     /**
