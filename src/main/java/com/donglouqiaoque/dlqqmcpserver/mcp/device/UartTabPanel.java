@@ -53,9 +53,11 @@ public final class UartTabPanel extends JPanel implements RefreshableTab {
         baudCombo.setSelectedItem(1000000);
         baudCombo.setMaximumSize(new Dimension(120, 25));
         line1.add(baudCombo);
+        line1.add(Box.createHorizontalStrut(10));
         JButton openButton = new JButton("打开选中串口");
         openButton.addActionListener(e -> openSelectedPort());
         line1.add(openButton);
+        line1.add(Box.createHorizontalStrut(8));
         JButton closeButton = new JButton("关闭选中设备");
         closeButton.addActionListener(e -> closeSelectedDevice());
         line1.add(closeButton);

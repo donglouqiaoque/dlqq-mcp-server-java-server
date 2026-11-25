@@ -77,6 +77,9 @@ dlqq_ble_subscribe|S|R|0
 dlqq_ble_unsubscribe|S|R|0
 dlqq_ble_get_log|S|S|0
 dlqq_check_bluetooth_open|S|S|0
+# Project build scripts: running the build is RISK; setting the build script is HIGH (needs approval)
+dlqq_build_project|R|S|0
+dlqq_set_build_script|H|S|0
 dlqq_mouse_move|S|R|0
 dlqq_mouse_click|S|R|0
 dlqq_mouse_press|S|R|0
@@ -103,8 +106,8 @@ dlqq_calculator_programmer|S|S|0
 dlqq_calculator_function|S|S|0
 dlqq_get_mcp_version|S|S|0
 dlqq_get_mcp_properties|S|S|0
-dlqq_set_mcp_properties|R|S|0
-dlqq_reset_mcp_properties|R|S|0
+dlqq_set_mcp_properties|H|S|0
+dlqq_reset_mcp_properties|H|S|0
 dlqq_mcp_hide_tools|H|S|0
 dlqq_mcp_show_tools|H|S|0
 dlqq_mcp_reset_tools|H|S|0

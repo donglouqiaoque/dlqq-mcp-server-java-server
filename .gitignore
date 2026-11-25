@@ -7,6 +7,8 @@ target
 .release
 .venv
 
+.ai*
+
 .runtime/*
 !.runtime/start-http.bat
 !.runtime/build.bat

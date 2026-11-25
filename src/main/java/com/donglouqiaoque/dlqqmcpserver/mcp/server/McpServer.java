@@ -589,6 +589,15 @@ public class McpServer {
 
         // 权限策略校验：按风险等级与 AI 权限等级决定 允许 / 需要批准 / 拒绝
         ToolPolicy.Result policyResult = ToolPolicy.decide(toolName, arguments);
+        if (policyResult.decision() == ToolPolicy.Decision.ERROR) {
+            CallToolResult preflight = new CallToolResult();
+            preflight.setError(true);
+            List<ToolContent> content = new ArrayList<>();
+            content.add(ToolContent.error("✗ " + policyResult.message()));
+            preflight.setContent(content);
+            sendResponse(request.getId(), preflight);
+            return;
+        }
         if (policyResult.decision() == ToolPolicy.Decision.DENY) {
             CallToolResult denied = new CallToolResult();
             denied.setError(true);

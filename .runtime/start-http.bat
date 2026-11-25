@@ -16,21 +16,25 @@ REM
 REM Double-click to start.
 REM
 REM Usage:
-REM   start-http.bat [nopause]
+REM   start-http.bat [-ai]
 REM
-REM   nopause  skip the final pause (used by AI automation)
+REM   -ai (ai, --ai and /ai are also accepted) selects AI/automation mode:
+REM       use the current directory as the workspace (no prompt) and skip the pause.
 REM
 REM RULE: this file must stay ASCII-only.
 REM ============================================================
 
+set "AI_MODE=0"
 set "NOPAUSE=0"
 :parse
 if "%~1"=="" goto parsed
-if /i "%~1"=="nopause"  ( set "NOPAUSE=1" & shift & goto parse )
-if /i "%~1"=="-nopause" ( set "NOPAUSE=1" & shift & goto parse )
-if /i "%~1"=="/nopause" ( set "NOPAUSE=1" & shift & goto parse )
+if /i "%~1"=="ai"   ( set "AI_MODE=1" & shift & goto parse )
+if /i "%~1"=="-ai"  ( set "AI_MODE=1" & shift & goto parse )
+if /i "%~1"=="--ai" ( set "AI_MODE=1" & shift & goto parse )
+if /i "%~1"=="/ai"  ( set "AI_MODE=1" & shift & goto parse )
 shift & goto parse
 :parsed
+if "%AI_MODE%"=="1" set "NOPAUSE=1"
 
 set "JAR=dlqq_mcp_server.jar"
 set "JAVA=java\bin\java.exe"
@@ -61,6 +65,8 @@ if not exist "%PYTHON%" (
     call :do_pause
     exit /b 1
 )
+
+if "%AI_MODE%"=="1" goto use_cwd
 
 :ask_workspace
 set "WORKSPACE="

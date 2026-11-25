@@ -2,6 +2,7 @@ package com.donglouqiaoque.dlqqmcpserver.mcp.tools;
 
 import com.donglouqiaoque.dlqqmcpserver.mcp.device.BleDevices;
 import com.donglouqiaoque.dlqqmcpserver.mcp.protocol.McpSchema.*;
+import com.donglouqiaoque.dlqqmcpserver.mcp.policy.ToolPolicy;
 import com.donglouqiaoque.dlqqmcpserver.mcp.server.McpServer;
 import com.donglouqiaoque.dlqqmcpserver.utils.RuntimeDirs;
 import com.donglouqiaoque.dlqqmcpserver.utils.SessionScope;
@@ -82,11 +83,12 @@ public class AITools {
         registerGetMcpVersionTool(server);          // dlqq_get_mcp_version
         // 【源码屏蔽】dlqq_test_hot_reload：仅用于验证热加载，常规使用不需要
         // registerTestHotReloadTool(server);          // dlqq_test_hot_reload
-        registerMcpHideToolsTool(server);           // dlqq_mcp_hide_tools
-        registerMcpShowToolsTool(server);           // dlqq_mcp_show_tools
+        // 【源码屏蔽】暂时屏蔽隐藏工具功能：仅保留 dlqq_mcp_refresh_tools；hide/show/reset/run 不注册
+        // registerMcpHideToolsTool(server);           // dlqq_mcp_hide_tools
+        // registerMcpShowToolsTool(server);           // dlqq_mcp_show_tools
         registerMcpRefreshToolsTool(server);        // dlqq_mcp_refresh_tools
-        registerMcpResetToolsTool(server);          // dlqq_mcp_reset_tools
-        registerMcpRunToolsTool(server);            // dlqq_mcp_run_tools
+        // registerMcpResetToolsTool(server);          // dlqq_mcp_reset_tools
+        // registerMcpRunToolsTool(server);            // dlqq_mcp_run_tools
         registerWorkspaceSetTool(server);           // dlqq_workspace_set
         registerWorkspaceGetTool(server);           // dlqq_workspace_get
         registerGetCwdPathTool(server);             // dlqq_get_cwd_path
@@ -117,10 +119,9 @@ public class AITools {
         // ========== 命令执行工具 ==========
         RunCommandTools.registerTools(server);      // dlqq_run_command
 
-
         // ========== 项目构建和芯片操作工具 ==========
-        // 【源码屏蔽】根据《MCP 工具权限架构》：项目构建/芯片操作/脚本路径设置类工具不暴露给 AI
-        // registerBuildProjectTool(server);           // dlqq_build_project
+        // 已恢复 dlqq_build_project（资源风险 R，无需每次审批）；其余构建/芯片工具仍源码屏蔽。
+        registerBuildProjectTool(server);           // dlqq_build_project
         // registerRebuildProjectTool(server);         // dlqq_rebuild_project
         // registerChipEraseTool(server);              // dlqq_chip_erase
         // registerChipDownloadTool(server);           // dlqq_chip_download
@@ -139,8 +140,8 @@ public class AITools {
         // registerRebuildDebugProjectTool(server);    // dlqq_rebuild_debug_project
 
         // ========== 脚本路径设置工具 ==========
-        // 【源码屏蔽】全部脚本路径设置工具：AI 不得通过设置脚本来绕过人工审批
-        // registerSetBuildScriptTool(server);         // dlqq_set_build_script
+        // 已恢复 dlqq_set_build_script（资源高危 H，需要用户审批）；其余脚本路径设置工具仍源码屏蔽。
+        registerSetBuildScriptTool(server);         // dlqq_set_build_script
         // registerSetRebuildScriptTool(server);       // dlqq_set_rebuild_script
         // registerSetChipEraseScriptTool(server);     // dlqq_set_chip_erase_script
         // registerSetChipDownloadScriptTool(server);  // dlqq_set_chip_download_script
@@ -321,7 +322,8 @@ public class AITools {
         ToolInputSchema inputSchema = new ToolInputSchema(properties, Arrays.asList("file_path"));
 
         server.addTool("dlqq_overwrite_file",
-            "覆盖指定文件的内容，不管文件是否存在都会直接写入。自动创建父目录。支持指定字符集编码（默认UTF-8）。",
+            "覆盖已有文件的内容，文件必须已存在；新建文件请使用 dlqq_create_file。支持指定字符集编码（默认UTF-8）。"
+                    + "文件较小时会按内容相似度评估：相似度较高的小改动按风险工具处理，否则按高危工具审批。",
             inputSchema,
             arguments -> {
                 String filePath = (String) arguments.get("file_path");
@@ -2988,42 +2990,32 @@ public class AITools {
 
         Map<String, Object> keyProp = new HashMap<>();
         keyProp.put("type", "string");
-        keyProp.put("description", "属性键名，例如：response.max.size、search.max.files、script.build");
+        keyProp.put("description", "属性键名（必填），例如：response.max.size、search.max.files");
         properties.put("key", keyProp);
 
         Map<String, Object> valueProp = new HashMap<>();
         valueProp.put("type", "string");
-        valueProp.put("description", "属性值");
+        valueProp.put("description", "属性值（必填；本工具不支持只传 key 查询，查询属性请使用 dlqq_get_mcp_properties）");
         properties.put("value", valueProp);
 
-        ToolInputSchema inputSchema = new ToolInputSchema(properties, Collections.emptyList());
+        ToolInputSchema inputSchema = new ToolInputSchema(properties,
+                Arrays.asList("key", "value"));
 
         server.addTool("dlqq_set_mcp_properties",
-            "设置MCP配置属性。至少指定 key 和 value 其中一个参数。配置保存到 .dlqq/settings/settings.properties 文件中。常用属性包括：response.max.size（响应大小限制，默认25804字节约25KB，最大258048）、search.max.files（最大搜索文件数）、search.max.file.size（最大文件大小）、search.text.extensions（文本文件后缀）、script.build（构建脚本路径）等。",
+            "设置MCP配置属性（资源高危，需要用户审批）。必须同时指定 key 和 value；不支持只传 key 查询属性（查询请用 dlqq_get_mcp_properties）。配置保存到 .dlqq/settings/settings.properties 文件中。常用属性包括：response.max.size（响应大小限制，默认25804字节约25KB，最大258048）、search.max.files（最大搜索文件数）、search.max.file.size（最大文件大小）、search.text.extensions（文本文件后缀）等。受保护属性 permission.*、script.*、tool.policy.*、mcp.tools.* 禁止通过本工具修改，申请修改会直接拒绝且不进入审批。",
             inputSchema,
             arguments -> {
                 String key = (String) arguments.get("key");
                 String value = (String) arguments.get("value");
 
-                if ((key == null || key.isEmpty()) && (value == null || value.isEmpty())) {
-                    return errorResult("至少指定一个参数：key 或 value");
+                if (key == null || key.isBlank() || value == null || value.isEmpty()) {
+                    return errorResult("必须同时指定 key 和 value；查询属性请使用 dlqq_get_mcp_properties");
                 }
 
-                // 如果只指定了key，显示该属性的当前值
-                if (key != null && !key.isEmpty() && (value == null || value.isEmpty())) {
-                    String currentValue = McpTools.getConfigFromSettings(key);
-                    if (currentValue == null) {
-                        return textResult("属性 '" + key + "' 不存在");
-                    }
-                    return textResult(key + " = " + currentValue + "\n\n使用 dlqq_set_mcp_properties 并指定 value 参数来修改该属性");
-                }
-
-                // 设置属性
-                // 权限相关属性禁止通过本工具修改：权限只能由 dlqq_workspace_permission_set 管理
-                if (key != null && (key.startsWith("permission.") || key.startsWith("tool.policy.")
-                        || "workspace.write.mode".equals(key))) {
-                    return errorResult("✗ 拒绝设置：'" + key + "' 属于权限相关属性，"
-                            + "请使用 dlqq_workspace_permission_set 修改权限，本工具不接受权限类键名");
+                // 权限、脚本、工具管理等受保护属性禁止通过本工具修改（策略层已提前拒绝，此处兜底）
+                if (ToolPolicy.isProtectedPropertyKey(key)) {
+                    return errorResult("拒绝设置：'" + key + "' 属于权限/脚本/工具管理保护属性，"
+                            + "只能通过专用安全工具修改，本工具拒绝操作");
                 }
                 // 对 response.max.size 进行验证，不能超过API上限
                 if ("response.max.size".equals(key)) {
@@ -3088,17 +3080,14 @@ public class AITools {
         });
     }
 
-    /*
-     * 【已屏蔽】dlqq_set_build_script - 设置构建脚本路径
-     * 屏蔽原因：AI 不应通过设置脚本路径绕过人工审批（构建必须走 dlqq_run_command 并人工确认）。
-     * 保留代码以备将来恢复；如需启用，取消下一段注释并把上面的注册行一并放开。
-     *
+    /**
+     * dlqq_set_build_script - 设置构建脚本路径（资源高危，需要用户审批）
+     */
     private void registerSetBuildScriptTool(McpServer server) {
         registerSetScriptTool(server, "dlqq_set_build_script",
-            "设置构建脚本路径。配置保存到 .dlqq/settings/settings.properties 的 script.build 项。",
+            "设置构建脚本路径（资源高危操作，需要用户审批）。配置保存到 .dlqq/settings/settings.properties 的 script.build 项。",
             McpTools::setBuildScript);
     }
-     */
 
     /**
      * dlqq_get_tool_list - 获取工具列表
@@ -3239,17 +3228,47 @@ public class AITools {
 
         Map<String, Object> keyProp = new HashMap<>();
         keyProp.put("type", "string");
-        keyProp.put("description", "要重置的属性键名（可选）。如果为空，则重置所有配置为默认值");
+        keyProp.put("description", "单个属性键名（可选；与 keys 二选一）");
         properties.put("key", keyProp);
+
+        Map<String, Object> keysProp = new HashMap<>();
+        keysProp.put("type", "array");
+        Map<String, Object> itemProp = new HashMap<>();
+        itemProp.put("type", "string");
+        keysProp.put("items", itemProp);
+        keysProp.put("description", "批量属性键名数组（可选；与 key 二选一；受保护属性会被过滤）");
+        properties.put("keys", keysProp);
 
         ToolInputSchema inputSchema = new ToolInputSchema(properties, Collections.emptyList());
 
         server.addTool("dlqq_reset_mcp_properties",
-            "重置MCP配置属性为默认值。可以重置单个属性或所有属性。配置保存到 .dlqq/settings/settings.properties 文件中。",
+            "重置MCP配置属性为默认值（资源高危，需要用户审批）。支持单个 key、批量 keys，或不传参数重置全部；单个受保护属性直接拒绝，批量/全部中的受保护属性会自动过滤跳过；只要有任何非保护属性重置失败，整次调用返回失败。",
             inputSchema,
             arguments -> {
                 String key = (String) arguments.get("key");
-                String result = McpTools.resetProperties(key);
+                List<String> keys = new ArrayList<>();
+                Object keysObj = arguments.get("keys");
+                if (keysObj instanceof List<?> rawList) {
+                    for (Object item : rawList) {
+                        if (item != null) {
+                            keys.add(String.valueOf(item));
+                        }
+                    }
+                }
+
+                boolean hasKey = key != null && !key.isBlank();
+                boolean hasKeys = !keys.isEmpty();
+                if (hasKey && hasKeys) {
+                    return errorResult("不能同时指定 key 和 keys，请二选一");
+                }
+                if (hasKey && ToolPolicy.isProtectedPropertyKey(key)) {
+                    return errorResult("拒绝重置：'" + key + "' 属于权限/脚本/工具管理保护属性");
+                }
+
+                Collection<String> requestedKeys = hasKey
+                        ? Collections.singletonList(key)
+                        : (hasKeys ? keys : null);
+                String result = McpTools.resetProperties(requestedKeys);
                 return textResult(result);
             }
         );

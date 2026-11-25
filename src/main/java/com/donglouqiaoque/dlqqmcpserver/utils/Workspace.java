@@ -50,8 +50,6 @@ public final class Workspace {
     public static final String PERMISSION_KEY = "permission.resource.level";
     /** 操作权限配置键（鼠标/键盘/屏幕/串口/BLE/WiFi/USB 等外设操作） */
     public static final String OPERATION_PERMISSION_KEY = "permission.operation.level";
-    /** 旧的工作区写权限键：只做兼容清理 */
-    public static final String LEGACY_PERMISSION_KEY = "workspace.write.mode";
     /**
      * 旧的工作区本地配置相对路径。
      *
@@ -248,7 +246,6 @@ public final class Workspace {
         }
         try {
             writeSettingsValue(getSettingsFile(), PERMISSION_KEY, normalized);
-            removeLegacyPermissionKey(getSettingsFile());
         } catch (IOException e) {
             throw new IllegalArgumentException("写入资源权限配置失败: " + e.getMessage());
         }
@@ -326,7 +323,6 @@ public final class Workspace {
         Path settingsFile = settingsFileOf(root);
         try {
             writeSettingsValue(settingsFile, PERMISSION_KEY, normalized);
-            removeLegacyPermissionKey(settingsFile);
         } catch (IOException e) {
             throw new IllegalArgumentException("写入资源权限配置失败: " + e.getMessage());
         }
@@ -388,26 +384,6 @@ public final class Workspace {
         }
     }
 
-    /** 从配置文件中移除旧键 workspace.write.mode（迁移用）。 */
-    private static void removeLegacyPermissionKey(Path settingsFile) throws IOException {
-        if (!Files.isRegularFile(settingsFile)) {
-            return;
-        }
-        List<String> lines = Files.readAllLines(settingsFile, StandardCharsets.UTF_8);
-        List<String> kept = new ArrayList<>(lines.size());
-        boolean changed = false;
-        for (String line : lines) {
-            String trimmed = line.trim();
-            if (trimmed.startsWith(LEGACY_PERMISSION_KEY + "=")) {
-                changed = true;
-                continue;
-            }
-            kept.add(line);
-        }
-        if (changed) {
-            Files.write(settingsFile, kept, StandardCharsets.UTF_8);
-        }
-    }
 
     /** 当前会话标识（用于诊断输出）。 */
     public static String getSessionId() {

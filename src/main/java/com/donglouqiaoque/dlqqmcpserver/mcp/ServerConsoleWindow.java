@@ -262,6 +262,7 @@ public final class ServerConsoleWindow {
         tabs.addTab("USB", new UsbTabPanel());
         tabs.addTab("WiFi", new WifiTabPanel());
         tabs.addTab("环境", new EnvTabPanel());
+        tabs.addTab("版权鸣谢", new AboutTabPanel());
         frame.add(tabs, BorderLayout.CENTER);
 
         frame.addWindowListener(new WindowAdapter() {

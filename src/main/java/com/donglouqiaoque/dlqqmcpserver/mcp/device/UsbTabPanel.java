@@ -49,6 +49,7 @@ public final class UsbTabPanel extends JPanel implements RefreshableTab {
         JButton openButton = new JButton("打开选中设备");
         openButton.addActionListener(e -> openSelected());
         line1.add(openButton);
+        line1.add(Box.createHorizontalStrut(8));
         JButton closeButton = new JButton("关闭选中设备");
         closeButton.addActionListener(e -> closeSelected());
         line1.add(closeButton);

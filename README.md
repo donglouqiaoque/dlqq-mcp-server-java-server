@@ -24,7 +24,7 @@
 
 ## 工具列表
 
-本MCP服务器当前注册 **183** 个工具（运行时可调用），另有 1 个源码屏蔽、2 个规划中的工具定义，合计 185 条；完整风险等级与隐藏状态见[工具风险等级与隐藏状态](#工具风险等级与隐藏状态)。
+本MCP服务器当前注册 **118** 个工具（运行时可调用），另有 29 个源码屏蔽、2 个规划中的工具定义，合计 149 条；完整风险等级与隐藏状态见[工具风险等级与隐藏状态](#工具风险等级与隐藏状态)。
 > 说明：分组标题中的序号为历史遗留编号，实际工具数以各分组表格为准。
 
 产物 JAR 名为 **`dlqq_mcp_server.jar`**。
@@ -35,7 +35,7 @@
 |---------|------|
 | `dlqq_read_file` | 读取文件指定行范围的内容（支持字符集） |
 | `dlqq_create_file` | 创建新文件（支持空文件或带内容，支持字符集） |
-| `dlqq_overwrite_file` | 覆盖文件内容（不管是否存在都直接写入，支持字符集） |
+| `dlqq_overwrite_file` | 覆盖已有文件内容（文件不存在会直接报错，请改用 create_file；支持字符集） |
 | `dlqq_clear_file` | 清空文件内容（保留文件本身） |
 | `dlqq_append_file` | 在文件末尾追加内容（支持字符集） |
 | `dlqq_remove_lines_in_file` | 删除文件指定行范围的内容（支持字符集） |
@@ -162,8 +162,8 @@ BLE 的 UI 已用 **Java Swing** 重写并并入控制台窗口；Python 仅保�
 | `dlqq_clear_mcp_cache` | 清除MCP缓存目录（.dlqq/cache），删除所有缓存文件和子目录 |
 | `dlqq_clear_mcp_log` | 清除MCP日志文件（.dlqq/log），保留目录结构 |
 | `dlqq_get_mcp_properties` | 获取MCP配置属性列表或指定属性的值 |
-| `dlqq_set_mcp_properties` | 设置MCP配置属性（支持脚本路径、响应大小、搜索配置等） |
-| `dlqq_reset_mcp_properties` | 重置MCP配置属性为默认值（可重置单个或所有配置） |
+| `dlqq_set_mcp_properties` | 设置MCP配置属性（资源高危；只允许非保护属性，权限/脚本/工具管理类直接拒绝） |
+| `dlqq_reset_mcp_properties` | 重置单个非保护属性（资源高危；禁止全部重置及权限/脚本/工具管理类） |
 
 ### Office文件工具 (79-80)
 
@@ -384,12 +384,12 @@ WiFi 面板已并入控制台窗口；WiFi 工具（Java 原生实现）按系�
 | `dlqq_set_build_debug_script` | 设置构建调试组合脚本路径（script.build.debug） |
 | `dlqq_set_rebuild_run_script` | 设置重建运行组合脚本路径（script.rebuild.run） |
 | `dlqq_set_rebuild_debug_script` | 设置重建调试组合脚本路径（script.rebuild.debug） |
-| `dlqq_set_mcp_properties` | 设置MCP配置属性（含response.max.size，默认25804字节，最大258048） |
+| `dlqq_set_mcp_properties` | 设置MCP配置属性（资源高危，需审批且必须同时提供 key+value；禁止修改 `permission.*`、`script.*`、`tool.policy.*`、`mcp.tools.*`） |
 
 **说明**：
 - **不使用任何内置默认脚本**：所有脚本路径默认为空，未配置时工具会直接返回错误“未配置「xxx」脚本路径，需要先配置工具路径”，并给出对应的 `dlqq_set_*_script` 工具名
 - 执行类工具（`dlqq_build_project`、`dlqq_rebuild_project`、`dlqq_chip_erase`、`dlqq_chip_download`、`dlqq_erase_download`、`dlqq_build_erase_download`、`dlqq_rebuild_erase_download`、`dlqq_run_project`、`dlqq_debug_project`、`dlqq_build_run_project` 等）都遵循此规则
-- 首次使用前先调用对应的 `dlqq_set_*_script`，或用 `dlqq_set_mcp_properties` 直接写 `script.build` 等配置项
+- 首次使用前先调用对应的 `dlqq_set_*_script`；`script.*` 等受保护属性不允许通过 `dlqq_set_mcp_properties` 写入（会直接拒绝）
 - 脚本配置保存在 `<工作区>/.dlqq/settings/settings.properties` 文件中
 - `response.max.size` 控制文件操作返回内容的最大字节数（默认25804约25KB，最大258048约252KB）
 
@@ -501,12 +501,12 @@ script\build.bat
 REM 构建并复制到发布目录（推荐）
 script\build_and_copy.bat
 
-REM 开发期热构建：不删除 .runtime\libs 旧库，可在服务运行中使用
-.runtime\build.bat nopause hot-build
+REM AI/MCP 构建：传入 -ai，自动无阻塞（不 pause）+ 热构建（保留旧库）
+.runtime\build.bat -ai
 ```
 
-- `.runtime\build.bat` 不带 `hot-build`：先删除 `.runtime\libs\*.jar` 再复制，**需先停止服务**（运行中的服务会锁定已加载的 jar）；
-- 带 `hot-build`：保留旧库、只覆盖有变化的依赖，可在服务运行中构建；旧版本 jar 会累积，建议定期停服执行一次默认清理构建。
+- `.runtime\build.bat` 不带 `-ai`：先删除 `.runtime\libs\*.jar` 再复制，并在结束时 pause，**需先停止服务**（运行中的服务会锁定已加载的 jar）；
+- 带 `-ai`：AI/自动化模式，跳过 pause 并保留旧库、只覆盖有变化的依赖，可在服务运行中构建；`dlqq_build_project` 调用脚本时会自动传入 `-ai`；旧版本 jar 会累积，建议定期停服执行一次默认清理构建。
 
 构建产物：
 
@@ -538,6 +538,7 @@ DSH 在 profile 目录的 `cordis.patch.yml`（Windows：`C:\Users\<用户名>\.
       config:
         serverName: dlqq-mcp
         transport: stdio
+        cwd: '<部署目录>\default_workspace'
         command: '<部署目录>\java\bin\java.exe'
         args:
           - "-Dfile.encoding=UTF-8"
@@ -548,6 +549,7 @@ DSH 在 profile 目录的 `cordis.patch.yml`（Windows：`C:\Users\<用户名>\.
 说明：
 - `id` 在文件内唯一即可；`serverName` 是客户端侧标识，会作为工具名前缀（如 `mcp__dlqq-mcp__` 里的 `dlqq-mcp`），与服务端 `initialize` 返回的 `dlqq-mcp-server` 是两个值，可以不同。
 - `command` 建议指向随包 JDK：`<部署目录>\java\bin\java.exe`；改用 PATH 上的 `java` 也可以，但版本需 ≥ 25。
+- `cwd` 固定设为 `<部署目录>\default_workspace`，这样 MCP 进程的默认工作区就是该目录；服务端仍保持"默认工作区 = 进程 CWD"的逻辑不变。HTTP 配置没有子进程，不需要 `cwd`。
 - 保存后重启 DeepSeek Harness，新会话即可通过 `tools/list` 看到全部 `dlqq_*` 工具。
 
 #### ② Qwen Code
@@ -559,6 +561,7 @@ Qwen Code 的 MCP 配置放在 **settings.json**（不是 mcp.json）：
   "mcpServers": {
     "dlqq-mcp-server": {
       "command": "java",
+      "cwd": "<部署目录>\\default_workspace",
       "args": [
         "-Dfile.encoding=UTF-8",
         "-jar",
@@ -585,6 +588,7 @@ Claude Code 项目级配置 `.mcp.json`：
     "dlqq-mcp-server": {
       "type": "stdio",
       "command": "java",
+      "cwd": "<部署目录>\\default_workspace",
       "args": ["-Dfile.encoding=UTF-8", "-jar", "E:\\Code\\AIProject\\dlqq-mcp-server\\.runtime\\dlqq_mcp_server.jar"]
     }
   }
@@ -608,6 +612,7 @@ Claude Desktop 使用 `claude_desktop_config.json`（Windows：`%APPDATA%\Claude
   "mcpServers": {
     "dlqq-mcp-server": {
       "command": "java",
+      "cwd": "<部署目录>\\default_workspace",
       "args": ["-Dfile.encoding=UTF-8", "-jar", "E:\\Code\\AIProject\\dlqq-mcp-server\\.runtime\\dlqq_mcp_server.jar"]
     }
   }
@@ -624,6 +629,7 @@ Claude Desktop 使用 `claude_desktop_config.json`（Windows：`%APPDATA%\Claude
     "dlqq-mcp-server": {
       "type": "stdio",
       "command": "java",
+      "cwd": "<部署目录>\\default_workspace",
       "args": ["-Dfile.encoding=UTF-8", "-jar", "E:\\Code\\AIProject\\dlqq-mcp-server\\.runtime\\dlqq_mcp_server.jar"]
     }
   }
@@ -639,6 +645,7 @@ Claude Desktop 使用 `claude_desktop_config.json`（Windows：`%APPDATA%\Claude
   "mcpServers": {
     "dlqq-mcp-server": {
       "command": "java",
+      "cwd": "<部署目录>\\default_workspace",
       "args": ["-Dfile.encoding=UTF-8", "-jar", "E:\\Code\\AIProject\\dlqq-mcp-server\\.runtime\\dlqq_mcp_server.jar"],
       "env": { "JAVA_TOOL_OPTIONS": "-Dfile.encoding=UTF-8" },
       "disabled": false,
@@ -657,6 +664,7 @@ Claude Desktop 使用 `claude_desktop_config.json`（Windows：`%APPDATA%\Claude
   "mcpServers": {
     "dlqq-mcp-server": {
       "command": "java",
+      "cwd": "<部署目录>\\default_workspace",
       "args": ["-Dfile.encoding=UTF-8", "-jar", "E:\\Code\\AIProject\\dlqq-mcp-server\\.runtime\\dlqq_mcp_server.jar"]
     }
   }
@@ -919,10 +927,16 @@ curl -X POST http://localhost:49129/mcp -H "Content-Type: application/json" \
 
 ### 3. dlqq_overwrite_file
 
-覆盖文件内容，不管文件是否存在都会直接写入。
+覆盖**已存在**文件的内容。文件不存在时会在审批前直接报错，不会弹审批窗口；新建文件请使用 `dlqq_create_file`。
+
+**风险与审批规则**：
+- 目标文件不存在 → 审批前直接返回错误，提示改用 `dlqq_create_file`；
+- 文件超过 **1 MiB 或 20,000 行**（新旧内容任一超限）→ 保持高危，按高危工具审批，不计算相似度；
+- 小文件且行级相似度 **≥ 90%**、同时改动行数 ≤ `max(3, 旧行数 × 10%)` → 降级为风险工具，按当前资源权限直接执行（工作区内外由资源权限决定）；
+- 文件无法读取/解码、二进制内容、相似度不足或 diff 失败 → 保持高危。
 
 **参数**：
-- `file_path` (string, 必需): 文件路径
+- `file_path` (string, 必需): 文件路径（必须已存在）
 - `content` (string, 可选): 文件内容（会完全覆盖原文件内容）
 - `charset` (string, 可选): 字符集编码（默认 UTF-8）
 
@@ -2142,7 +2156,7 @@ curl -X POST http://localhost:49129/mcp -H "Content-Type: application/json" \
 | `dlqq_workspace_reset` | 回退到 `--workspace`（若指定）或进程 CWD，不修改权限配置 | 无 |
 | `dlqq_workspace_permission_set` | 设置工作区文件修改权限并持久化到工作区配置文件 | `mode`：`readonly` / `workspace` / `approval` / `full` |
 
-**修改权限**：持久化在**工作区内**的 `.dlqq/settings/settings.properties`（键 `workspace.write.mode`），切换工作区时会自动重新加载：
+**修改权限**：持久化在 `<jar 同级>/.dlqq/settings/<工作区hash>/settings.properties`（键 `permission.resource.level`），切换工作区时会自动重新加载：
 
 | 模式 | 含义 | 行为 |
 |------|------|------|
@@ -2155,7 +2169,7 @@ curl -X POST http://localhost:49129/mcp -H "Content-Type: application/json" \
 
 **影响范围**：文件/目录/搜索/二进制/BOM/压缩/Office/图片/截图/对话框/命令执行等工具的相对路径，脚本执行的工作目录（`ProcessBuilder.directory`），BLE 脚本目录，以及 `.aiignore/.aiwriterules/.aireadrules` 的基准目录。
 
-**注意**：工作区内的 `.dlqq` 目录（日志、缓存、配置）整个随工作区移动（工作区默认 = 进程 CWD）；`<工作区>/.dlqq/settings/settings.properties` 保存修改权限和全部配置（`workspace.write.mode`、`script.*`、`response.max.size`、`mcp.tools.excluded` 等）。
+**注意**：运行时数据在 `<jar 同级>/.dlqq/`（不随工作区移动）；`settings/<工作区hash>/settings.properties` 保存权限和配置（`permission.*`、`script.*`、`response.max.size`、`mcp.tools.excluded` 等）。
 
 **实测**：`--workspace` 启动后相对路径创建的文件落在指定目录；`workspace` 模式写工作区外被拒绝；`readonly` 模式写工作区内也被拒绝；`approval` 模式工作区内直接写入、工作区外弹审批框；`full` 模式可写工作区外；权限写入工作区配置文件，重启（同一 `--workspace`）后继续生效；不带 `--workspace` 重启则回到进程 CWD 并使用其默认权限。
 
@@ -2227,33 +2241,22 @@ curl -X POST http://localhost:49129/mcp -H "Content-Type: application/json" \
 
 ### 77. dlqq_set_mcp_properties
 
-设置MCP配置属性。配置保存到 `<工作区>/.dlqq/settings/settings.properties` 文件中。
+设置MCP配置属性（**资源高危，需要用户审批**）。配置保存到 `<jar 同级>/.dlqq/settings/<工作区hash>/settings.properties` 文件中。
+
+受保护属性 `permission.*`、`script.*`、`tool.policy.*`、`mcp.tools.*` **禁止通过本工具修改**；这类申请会直接拒绝且不进入审批。
 
 **参数**：
-- `key` (string, 可选): 属性键名，例如：response.max.size、search.max.files、script.build
-- `value` (string, 可选): 属性值
+- `key` (string, 必填): 属性键名，例如：response.max.size、search.max.files、search.max.file.size、search.text.extensions
+- `value` (string, 必填): 属性值
 
-**说明**：至少指定 key 和 value 其中一个参数。如果只指定 key，则显示该属性的当前值。
+**说明**：必须同时提供 `key` 和 `value`；**不支持只传 key 查询属性**，查询请使用 `dlqq_get_mcp_properties`。脚本路径必须使用对应的 `dlqq_set_*_script` 设置，不能通过本工具写入。
 
-**常用配置项**：
+**常用配置项**（仅非保护属性）：
 - `response.max.size` - 最大回复文本大小（字节），默认25804（约25KB），最大258048（API上限）
 - `search.max.files` - 最大搜索文件数，默认1000
 - `search.max.file.size` - 最大文件大小（字节），默认10MB
 - `search.max.results` - 最大搜索结果数，默认50
 - `search.text.extensions` - 默认文本文件后缀列表
-- `script.build` - 构建脚本路径
-- `script.rebuild` - 重建脚本路径
-- `script.chip.erase` - 芯片擦除脚本路径
-- `script.chip.download` - 芯片下载脚本路径
-- `script.erase.download` - 擦除下载组合脚本路径
-- `script.build.erase.download` - 构建擦除下载组合脚本路径
-- `script.rebuild.erase.download` - 重建擦除下载组合脚本路径
-- `script.run` - 运行项目脚本路径
-- `script.debug` - 调试项目脚本路径
-- `script.build.run` - 构建运行组合脚本路径
-- `script.build.debug` - 构建调试组合脚本路径
-- `script.rebuild.run` - 重建运行组合脚本路径
-- `script.rebuild.debug` - 重建调试组合脚本路径
 
 **示例**：
 ```json
@@ -2263,35 +2266,37 @@ curl -X POST http://localhost:49129/mcp -H "Content-Type: application/json" \
 // 设置搜索最大文件数为500
 { "key": "search.max.files", "value": "500" }
 
-// 设置构建脚本路径
-{ "key": "script.build", "value": "script\\build.bat" }
-
 // 设置默认文本文件后缀
 { "key": "search.text.extensions", "value": ".java,.c,.cpp,.h,.py" }
-
-// 查询当前属性的值（不设置）
-{ "key": "response.max.size" }
 ```
 
 **返回**：设置结果消息，包含属性键、旧值（如有）和新值
 
 ### 80. dlqq_reset_mcp_properties
 
-重置MCP配置属性为默认值。
+重置MCP配置属性为默认值（**资源高危，需要用户审批**）。支持三种方式：
+
+1. 不传参数：重置**全部非保护属性**（受保护属性自动过滤跳过）；
+2. 传 `keys` 数组：批量重置，受保护属性自动过滤跳过；
+3. 传单个 `key`：只重置该属性；如果是受保护属性则**直接报错**。
 
 **参数**：
-- `key` (string, 可选): 要重置的属性键名。如果为空，则重置所有配置为默认值
+- `key` (string, 可选): 单个属性键名（与 `keys` 二选一）
+- `keys` (array, 可选): 批量属性键名数组（与 `key` 二选一；受保护属性会被过滤）
 
 **示例**：
 ```json
-// 重置单个属性为默认值
-{ "key": "response.max.size" }
-
-// 重置所有配置为默认值
+// 重置全部非保护属性
 {}
+
+// 批量重置非保护属性
+{ "keys": ["response.max.size", "search.max.files"] }
+
+// 重置单个非保护属性
+{ "key": "response.max.size" }
 ```
 
-**说明**：重置后会将配置恢复为系统默认值。
+**说明**：`permission.*`、`script.*`、`tool.policy.*`、`mcp.tools.*` 等受保护属性不允许重置。批量或全部重置时，只要**任意一个非保护属性重置失败**，整次调用返回失败；全部成功才算成功。
 
 ### 81. dlqq_read_office_file
 
@@ -2805,7 +2810,7 @@ settings.json
 
 ## 权限与超时
 
-### 两级权限（不再使用旧的 workspace.write.mode）
+### 两级权限
 
 | 配置项 | 说明 |
 |---|---|
@@ -2821,10 +2826,9 @@ settings.json
 
 - 新工作区（含进程 CWD、`default_workspace`）首次使用即写入默认 `chat`，需要先用权限工具提权；
 - 同一工作区的多个会话共用一份 settings；切换工作区 = 切换 settings 与权限；
-- 旧的 `workspace.write.mode` 已废弃：不再读取，写入新键时会自动清理；
 - `.dlqq` 目录（配置/日志/缓存/数据）**任何权限等级下都禁止 AI 读写**，
   仅当前工作区缓存目录（`.dlqq/cache/<工作区hash>/`，按工作区隔离、不区分会话）内的内容允许读写；
-- 权限只能通过 `dlqq_workspace_permission_set` 修改（`dlqq_set_mcp_properties` 拒绝权限类键名）。
+- 权限只能通过 `dlqq_workspace_permission_set` 修改；`dlqq_set_mcp_properties` / `dlqq_reset_mcp_properties` 对 `permission.*`、`script.*`、`tool.policy.*`、`mcp.tools.*` 等保护属性直接拒绝，不进入审批。
 
 ### 工作区切换
 
@@ -2886,12 +2890,13 @@ settings.json
 
 服务启动后（有图形环境时）控制台**默认隐藏到系统托盘**，不弹出窗口；**单击**托盘图标或托盘菜单"显示控制台"可打开：
 
-- 菜单栏下方为选项卡：**会话管理 / BLE / UART / USB / WiFi / 环境**；外设不再单独开窗，设备在各自选项卡内以列表 + 面板管理；
+- 菜单栏下方为选项卡：**会话管理 / BLE / UART / USB / WiFi / 环境 / 版权鸣谢**；外设不再单独开窗，设备在各自选项卡内以列表 + 面板管理；
   **环境**选项卡展示 Java（版本/供应商/安装目录/JAR/堆内存）与 Python（解释器/版本/pip/bleak）信息，并提供打开目录、
   安装/更新 BLE 依赖、重建 Python 环境（调用 `.runtime\make_python_env.bat`）的入口；
+  **版权鸣谢**选项卡展示作者/联系作者、版本与**按系统时区显示**的构建时间；许可正文动态读取 `THIRD-PARTY-NOTICES.txt`（**jar 同级目录，即 `.runtime`**，界面显示实际路径），文件不存在时文本框提示未找到并给定期望路径、点击「打开第三方许可文件」弹出错误；另提供打开部署目录/作者网站按钮；
 - 窗口菜单栏显示中文名「鸫楼桥鹊MCP服务器控制台」（下拉含"隐藏到托盘 / 退出服务器"），右侧为「刷新」按钮（靠右留出间距）；
   **「刷新」按钮刷新当前选中选项卡**：会话管理刷新表格；BLE 刷新后端状态/设备列表；UART、USB 重新枚举设备；
-  WiFi 刷新网卡与连接状态；环境重新检测 Java/Python 信息；各选项卡内部不再单独放"刷新"按钮；
+  WiFi 刷新网卡与连接状态；环境重新检测 Java/Python 信息；版权鸣谢重新读取许可文件；各选项卡内部不再单独放"刷新"按钮；
 - 系统标题栏中间的标题文字已置空（不显示窗口标题）；菜单栏**中间显示「联系作者：https://www.donglouqiaoque.com」**
   （可点击，打开默认浏览器）；表格默认显示"会话管理"选项卡；
 - 表格按**最后活跃时间倒序**展示两类行：活跃会话行，以及 `workspace_config.json` 中出现过但当前无活跃会话的工作区行；
@@ -3105,6 +3110,8 @@ DSH 官方 `@deepseek-ai/dsh-mcp-client` 不发送 `_meta`，所有对话共享�
 | dlqq_add_unicode_bom | 风险 | 无危 | 完全访问 |
 | dlqq_remove_unicode_bom | 风险 | 无危 | 完全访问 |
 
+> 注：`dlqq_overwrite_file` 在目标文件不超过 1 MiB / 20,000 行、且新旧内容行级相似度 ≥ 90%（改动行数 ≤ `max(3, 旧行数×10%)`）时按风险工具执行，否则按高危工具审批；文件不存在时审批前直接报错。
+
 #### 4.2 目录操作（8）
 
 | 工具名称 | 资源风险 | 外设风险 | 默认隐藏状态 |
@@ -3251,13 +3258,13 @@ DSH 官方 `@deepseek-ai/dsh-mcp-client` 不发送 `_meta`，所有对话共享�
 |---|---|---|---|
 | dlqq_get_mcp_version | 无危 | 无危 | 完全访问 |
 | dlqq_get_mcp_properties | 无危 | 无危 | 完全访问 |
-| dlqq_set_mcp_properties | 风险 | 无危 | 完全访问 |
-| dlqq_reset_mcp_properties | 风险 | 无危 | 完全访问 |
-| dlqq_mcp_hide_tools | 高危 | 无危 | 完全访问 |
-| dlqq_mcp_show_tools | 高危 | 无危 | 完全访问 |
+| dlqq_set_mcp_properties | 高危（必须同时提供 key+value；保护属性直接拒绝） | 无危 | 完全访问 |
+| dlqq_reset_mcp_properties | 高危（支持 key/keys/全部；自动过滤保护属性，任一失败则整体失败） | 无危 | 完全访问 |
+| dlqq_mcp_hide_tools | 高危 | 无危 | 源码屏蔽 |
+| dlqq_mcp_show_tools | 高危 | 无危 | 源码屏蔽 |
 | dlqq_mcp_refresh_tools | 无危 | 无危 | 完全访问 |
-| dlqq_mcp_reset_tools | 高危 | 无危 | 完全访问 |
-| dlqq_mcp_run_tools | 高危 | 无危 | 完全访问 |
+| dlqq_mcp_reset_tools | 高危 | 无危 | 源码屏蔽 |
+| dlqq_mcp_run_tools | 高危 | 无危 | 源码屏蔽 |
 | dlqq_clear_mcp_cache | 风险 | 无危 | 完全访问 |
 | dlqq_clear_mcp_data | 高危 | 无危 | 完全访问 |
 | dlqq_clear_mcp_log | 风险 | 无危 | 完全访问 |
@@ -3279,7 +3286,7 @@ DSH 官方 `@deepseek-ai/dsh-mcp-client` 不发送 `_meta`，所有对话共享�
 
 | 工具名称 | 资源风险 | 外设风险 | 默认隐藏状态 |
 |---|---|---|---|
-| dlqq_build_project | 高危 | 无危 | 源码屏蔽 |
+| dlqq_build_project | 风险 | 无危 | 完全访问 |
 | dlqq_rebuild_project | 高危 | 无危 | 源码屏蔽 |
 | dlqq_run_project | 高危 | 无危 | 源码屏蔽 |
 | dlqq_debug_project | 高危 | 无危 | 源码屏蔽 |
@@ -3297,7 +3304,7 @@ DSH 官方 `@deepseek-ai/dsh-mcp-client` 不发送 `_meta`，所有对话共享�
 
 | 工具名称 | 资源风险 | 外设风险 | 默认隐藏状态 |
 |---|---|---|---|
-| dlqq_set_build_script | 风险 | 无危 | 源码屏蔽 |
+| dlqq_set_build_script | 高危 | 无危 | 完全访问 |
 | dlqq_set_rebuild_script | 风险 | 无危 | 源码屏蔽 |
 | dlqq_set_run_script | 风险 | 无危 | 源码屏蔽 |
 | dlqq_set_debug_script | 风险 | 无危 | 源码屏蔽 |

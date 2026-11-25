@@ -62,6 +62,13 @@
             <version>2.15.0</version>
         </dependency>
 
+        <!-- java-diff-utils - 覆盖文件前后内容相似度评估（Apache-2.0，无运行时传递依赖） -->
+        <dependency>
+            <groupId>io.github.java-diff-utils</groupId>
+            <artifactId>java-diff-utils</artifactId>
+            <version>4.18</version>
+        </dependency>
+
         <!-- FlatLaf - 现代化 Swing 外观（工具窗口与对话框统一主题） -->
         <dependency>
             <groupId>com.formdev</groupId>

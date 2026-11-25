@@ -959,7 +959,7 @@ public class FileTools {
     }
 
     /**
-     * 覆盖文件内容（不管文件是否存在都直接写入）
+     * 覆盖文件内容（仅覆盖已存在的文件；新建请使用 createFile）
      *
      * @param filePath 文件路径
      * @param content  文件内容
@@ -984,6 +984,15 @@ public class FileTools {
 
         Path path = Workspace.resolve(filePath);
 
+        // 只允许覆盖已存在的文件；新建文件请使用 dlqq_create_file
+        if (!Files.exists(path)) {
+            throw new IOException("文件不存在: " + filePath
+                    + "。dlqq_overwrite_file 只能覆盖已有文件，新建文件请使用 dlqq_create_file。");
+        }
+        if (!Files.isRegularFile(path)) {
+            throw new IOException("目标路径不是普通文件，无法覆盖: " + filePath);
+        }
+
         // 解析字符集，默认为 UTF-8
         Charset cs = StandardCharsets.UTF_8;
         if (charset != null && !charset.trim().isEmpty()) {
@@ -994,26 +1003,16 @@ public class FileTools {
             }
         }
 
-        // 确保父目录存在
-        Path parent = path.getParent();
-        if (parent != null && !Files.exists(parent)) {
-            Files.createDirectories(parent);
-        }
-
         // 检查内容是否为空，拒绝写入空内容
         if (content == null || content.isEmpty()) {
             throw new IOException("【拒绝写入】不能使用空文本覆盖文件。如需清空文件内容，请使用专门的 dlqq_clear_file 工具。");
         }
 
         // 读取原文件内容（用于对比）
-        List<String> oldLines = new ArrayList<>();
-        int oldLineCount = 0;
-        if (Files.exists(path)) {
-            oldLines = Files.readAllLines(path, cs);
-            oldLineCount = oldLines.size();
-        }
+        List<String> oldLines = Files.readAllLines(path, cs);
+        int oldLineCount = oldLines.size();
 
-        // 直接写入内容（覆盖原有内容或创建新文件），根据记录的 BOM 状态决定是否写入 BOM
+        // 直接写入内容（覆盖原有内容），根据记录的 BOM 状态决定是否写入 BOM
         writeFileWithBomControl(path, content, cs, filePath);
 
         // 计算新文件行数

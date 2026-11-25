@@ -18,6 +18,7 @@ import com.donglouqiaoque.dlqqmcpserver.utils.RuntimeDirs;
 import com.donglouqiaoque.dlqqmcpserver.utils.SessionScope;
 import com.donglouqiaoque.dlqqmcpserver.utils.Workspace;
 import com.donglouqiaoque.dlqqmcpserver.utils.WorkspaceRegistry;
+import com.donglouqiaoque.dlqqmcpserver.mcp.policy.ToolPolicy;
 import java.time.format.DateTimeFormatter;
 import java.time.LocalDateTime;
 import java.time.ZonedDateTime;
@@ -466,6 +467,9 @@ public class McpTools {
             return new ScriptResult(output, -1);
         }
 
+        // 先加载结果类型：构建脚本可能会替换正在运行的 JAR，避免构建完成后加载该类失败
+        ScriptResult.class.getName();
+
         File scriptFile = Workspace.resolve(scriptPath).toFile();
         if (!scriptFile.exists()) {
             String output = "✗ 错误：脚本文件不存在\n" +
@@ -481,7 +485,8 @@ public class McpTools {
 
         int exitCode = -1;
         try {
-            ProcessBuilder pb = new ProcessBuilder(scriptPath);
+            // AI 调用固定追加 -ai：脚本据此跳过 pause、自动确认并采用热构建/热加载等模式
+            ProcessBuilder pb = new ProcessBuilder(scriptPath, "-ai");
             pb.directory(Workspace.getRoot().toFile());
             pb.redirectErrorStream(true);
 
@@ -668,14 +673,14 @@ public class McpTools {
         return result.toString();
     }
 
-    /*
-     * 【已屏蔽】设置构建脚本路径（配套 dlqq_set_build_script）
-     * 保留代码以备恢复；启用时与 AITools 中对应注册行一起放开。
-     *
+    /**
+     * 设置构建脚本路径（资源高危，需要用户审批）
+     * @param scriptPath 脚本路径
+     * @return 设置结果
+     */
     public static String setBuildScript(String scriptPath) {
         return setScriptInSettings("script.build", scriptPath, "构建项目");
     }
-     */
 
     /**
      * 设置重建脚本路径
@@ -1781,11 +1786,85 @@ public class McpTools {
     }};
 
     /**
-     * 重置配置属性为默认值
-     * @param key 属性键名，如果为null或空则重置所有配置
-     * @return 重置结果描述
+     * 重置配置属性为默认值。
+     *
+     * @param requestedKeys null 表示重置全部非保护属性；空集合表示没有可重置项；
+     *                      非空集合表示按指定键重置，受保护属性会被过滤跳过
+     * @return 重置结果描述；只要有任意一个属性重置失败，结果以 ✗ 开头
      */
-    public static String resetProperties(String key) {
+    public static String resetProperties(Collection<String> requestedKeys) {
+        List<String> targets = new ArrayList<>();
+        List<String> skipped = new ArrayList<>();
+
+        if (requestedKeys == null) {
+            for (String key : DEFAULT_PROPERTIES.keySet()) {
+                if (ToolPolicy.isProtectedPropertyKey(key)) {
+                    skipped.add(key);
+                } else {
+                    targets.add(key);
+                }
+            }
+        } else {
+            for (String key : requestedKeys) {
+                if (key == null || key.isBlank()) {
+                    continue;
+                }
+                if (ToolPolicy.isProtectedPropertyKey(key)) {
+                    if (!skipped.contains(key)) {
+                        skipped.add(key);
+                    }
+                } else if (!targets.contains(key)) {
+                    targets.add(key);
+                }
+            }
+        }
+
+        StringBuilder result = new StringBuilder();
+        if (targets.isEmpty()) {
+            result.append("✓ 没有可重置的非保护属性\n");
+            appendSkippedPropertyKeys(result, skipped);
+            return result.toString();
+        }
+
+        int successCount = 0;
+        int failCount = 0;
+        StringBuilder details = new StringBuilder();
+        for (String key : targets) {
+            String one = resetSingleProperty(key);
+            if (one.startsWith("✓")) {
+                successCount++;
+                details.append("✓ ").append(key).append('\n');
+            } else {
+                failCount++;
+                details.append("✗ ").append(key).append(": ")
+                        .append(one.replace("\n", " ")).append('\n');
+            }
+        }
+
+        if (failCount == 0) {
+            result.append("✓ 重置完成\n");
+            result.append("===================\n\n");
+            result.append("成功: ").append(successCount).append(" 个\n");
+            appendSkippedPropertyKeys(result, skipped);
+            result.append("\n").append(details);
+        } else {
+            result.append("✗ 重置失败：").append(failCount).append(" 个属性未能重置\n");
+            result.append("===================\n\n");
+            result.append("成功: ").append(successCount).append(" 个，失败: ").append(failCount).append(" 个\n");
+            appendSkippedPropertyKeys(result, skipped);
+            result.append("\n").append(details);
+        }
+        return result.toString();
+    }
+
+    private static void appendSkippedPropertyKeys(StringBuilder result, List<String> skipped) {
+        if (!skipped.isEmpty()) {
+            result.append("已跳过受保护属性: ").append(String.join(", ", skipped)).append('\n');
+        }
+    }
+
+    /** 重置单个配置项为默认值（受保护属性由调用方提前过滤）。 */
+    private static String resetSingleProperty(String key) {
         Path settingsPath = Workspace.getSettingsFile();
 
         // 检查settings目录是否存在
@@ -1799,61 +1878,31 @@ public class McpTools {
         }
 
         StringBuilder result = new StringBuilder();
-
-        if (key != null && !key.isEmpty()) {
-            // 重置单个属性
-            String defaultValue = DEFAULT_PROPERTIES.get(key);
-            if (defaultValue == null) {
-                // 非预定义属性：如果配置文件中存在，则删除该自定义属性
-                if (getConfigFromSettings(key) != null) {
-                    String removeResult = removePropertyFromSettings(key);
-                    if (removeResult.startsWith("✓")) {
-                        result.append("✓ 自定义配置项已删除\n");
-                        result.append("===================\n\n");
-                        result.append("键: ").append(key).append("\n");
-                        result.append("（该键不是预定义配置项，已从配置文件中删除）\n");
-                        result.append("\n").append(removeResult);
-                        return result.toString();
-                    }
-                    return "✗ 错误：删除配置项失败\n" + removeResult;
+        String defaultValue = DEFAULT_PROPERTIES.get(key);
+        if (defaultValue == null) {
+            // 非预定义属性：如果配置文件中存在，则删除该自定义属性
+            if (getConfigFromSettings(key) != null) {
+                String removeResult = removePropertyFromSettings(key);
+                if (removeResult.startsWith("✓")) {
+                    result.append("✓ 自定义配置项已删除\n");
+                    result.append("===================\n\n");
+                    result.append("键: ").append(key).append("\n");
+                    result.append("（该键不是预定义配置项，已从配置文件中删除）\n");
+                    result.append("\n").append(removeResult);
+                    return result.toString();
                 }
-                return "✗ 错误：配置项 '" + key + "' 不存在";
+                return "✗ 错误：删除配置项失败\n" + removeResult;
             }
-
-            // 设置默认值
-            String setResult = setProperty(key, defaultValue);
-
-            result.append("✓ 配置已重置为默认值\n");
-            result.append("===================\n\n");
-            result.append("键: ").append(key).append("\n");
-            result.append("默认值: ").append(defaultValue).append("\n");
-            result.append("\n").append(setResult);
-        } else {
-            // 重置所有配置
-            result.append("✓ 批量重置配置为默认值\n");
-            result.append("===================\n\n");
-
-            int successCount = 0;
-            int failCount = 0;
-
-            for (Map.Entry<String, String> entry : DEFAULT_PROPERTIES.entrySet()) {
-                String setResult = setProperty(entry.getKey(), entry.getValue());
-                if (setResult.startsWith("✓")) {
-                    successCount++;
-                    result.append("✓ ").append(entry.getKey()).append(" = ").append(entry.getValue()).append("\n");
-                } else {
-                    failCount++;
-                    result.append("✗ ").append(entry.getKey()).append(": ").append(setResult).append("\n");
-                }
-            }
-
-            result.append("\n");
-            result.append("成功: ").append(successCount).append("个\n");
-            if (failCount > 0) {
-                result.append("失败: ").append(failCount).append("个\n");
-            }
+            return "✗ 错误：配置项 '" + key + "' 不存在";
         }
 
+        // 设置默认值
+        String setResult = setProperty(key, defaultValue);
+        result.append("✓ 配置已重置为默认值\n");
+        result.append("===================\n\n");
+        result.append("键: ").append(key).append("\n");
+        result.append("默认值: ").append(defaultValue).append("\n");
+        result.append("\n").append(setResult);
         return result.toString();
     }
 

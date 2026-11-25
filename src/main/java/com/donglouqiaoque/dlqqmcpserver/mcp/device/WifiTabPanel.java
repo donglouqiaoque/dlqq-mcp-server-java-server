@@ -2,6 +2,7 @@ package com.donglouqiaoque.dlqqmcpserver.mcp.device;
 
 import com.donglouqiaoque.dlqqmcpserver.mcp.RefreshableTab;
 import javax.swing.BorderFactory;
+import javax.swing.Box;
 import javax.swing.DefaultListModel;
 import javax.swing.JButton;
 import javax.swing.JLabel;
@@ -43,12 +44,15 @@ public final class WifiTabPanel extends JPanel implements RefreshableTab {
         JPanel line1 = new JPanel();
         line1.add(new JLabel("无线网卡:"));
         line1.add(new JLabel("（netsh/nmcli 使用系统默认无线接口）"));
+        line1.add(Box.createHorizontalStrut(10));
         JButton scanButton = new JButton("扫描网络");
         scanButton.addActionListener(e -> scanAsync());
         line1.add(scanButton);
+        line1.add(Box.createHorizontalStrut(8));
         JButton connectButton = new JButton("连接选中网络");
         connectButton.addActionListener(e -> connectAsync());
         line1.add(connectButton);
+        line1.add(Box.createHorizontalStrut(8));
         JButton disconnectButton = new JButton("断开");
         disconnectButton.addActionListener(e -> disconnectAsync());
         line1.add(disconnectButton);

@@ -8,15 +8,18 @@ REM Fixed location: <project root>\.runtime\build.bat
 REM Project root is the parent directory of this script folder.
 REM
 REM Usage:
-REM   build.bat [nopause] [hot-build]
+REM   build.bat [-ai]
 REM
-REM   nopause    skip the final pause (used by AI automation)
-REM   hot-build  keep existing .runtime\libs jars (the server may be running);
-REM              without it, old jars are deleted first, then new ones copied
+REM   -ai (ai, --ai and /ai are also accepted) selects AI/automation mode:
+REM       skip the final pause and keep existing .runtime\libs jars,
+REM       so the MCP server may keep running while the JAR is replaced.
+REM   Without -ai the script pauses at the end and performs a clean build
+REM   (old jars are removed first).
 REM
 REM Output:
 REM   .runtime\dlqq_mcp_server.jar   (thin jar)
 REM   .runtime\libs\*.jar            (runtime dependencies)
+REM   .runtime\THIRD-PARTY-NOTICES.txt (copied from project root)
 REM
 REM Toolchain:
 REM   Java  : .runtime\java          (bundled JDK)
@@ -38,21 +41,27 @@ echo.
 
 cd /d "%PROJECT_DIR%"
 
+set "AI_MODE=0"
 set "NOPAUSE=0"
 set "HOT_BUILD=0"
 :parse
 if "%~1"=="" goto parsed
-if /i "%~1"=="nopause"  ( set "NOPAUSE=1" & shift & goto parse )
-if /i "%~1"=="-nopause" ( set "NOPAUSE=1" & shift & goto parse )
-if /i "%~1"=="/nopause" ( set "NOPAUSE=1" & shift & goto parse )
-if /i "%~1"=="hot-build"  ( set "HOT_BUILD=1" & shift & goto parse )
-if /i "%~1"=="-hot-build" ( set "HOT_BUILD=1" & shift & goto parse )
-if /i "%~1"=="/hot-build" ( set "HOT_BUILD=1" & shift & goto parse )
+if /i "%~1"=="ai"   ( set "AI_MODE=1" & shift & goto parse )
+if /i "%~1"=="-ai"  ( set "AI_MODE=1" & shift & goto parse )
+if /i "%~1"=="--ai" ( set "AI_MODE=1" & shift & goto parse )
+if /i "%~1"=="/ai"  ( set "AI_MODE=1" & shift & goto parse )
+echo [WARN] Unknown argument ignored: %~1
 shift & goto parse
 :parsed
 
+REM AI mode: MCP tool calls pass -ai; skip pause and keep the loaded jars.
+if "%AI_MODE%"=="1" (
+    set "NOPAUSE=1"
+    set "HOT_BUILD=1"
+)
+
 if "%HOT_BUILD%"=="1" (
-    echo [INFO] Library mode: hot-build - keep existing jars
+    echo [INFO] Library mode: keep existing jars
 ) else (
     echo [INFO] Library mode: clean - delete old jars first
 )
@@ -114,7 +123,7 @@ if "%HOT_BUILD%"=="0" (
     del /q "%RUNTIME_DIR%\libs\*.jar" >nul 2>&1
     if exist "%RUNTIME_DIR%\libs\*.jar" (
         echo [WARN] Some old jars are still locked and were not deleted.
-        echo [WARN] Stop the running server, or use: build.bat hot-build
+        echo [WARN] Stop the running server, or use: build.bat -ai
     )
 )
 
@@ -123,9 +132,23 @@ if %ERRORLEVEL% neq 0 (
     echo [ERROR] Failed to copy %JAR_NAME%
     echo [ERROR] Source: "%TARGET_DIR%\%JAR_NAME%"
     echo [ERROR] Target: "%RUNTIME_DIR%\%JAR_NAME%"
-    echo [ERROR] Hint: stop the running server or use hot-build, then retry.
+    echo [ERROR] Hint: stop the running server or use -ai, then retry.
     call :do_pause
     exit /b 1
+)
+
+REM Copy the version declaration file next to the jar: the release layout only
+REM has .runtime (the jar folder); runtime code has no parent-directory fallback.
+if exist "%PROJECT_DIR%\THIRD-PARTY-NOTICES.txt" (
+    copy /Y "%PROJECT_DIR%\THIRD-PARTY-NOTICES.txt" "%RUNTIME_DIR%\THIRD-PARTY-NOTICES.txt" >nul
+    if errorlevel 1 (
+        echo [ERROR] Failed to copy THIRD-PARTY-NOTICES.txt to "%RUNTIME_DIR%"
+        call :do_pause
+        exit /b 1
+    )
+    echo [INFO] Notices: "%RUNTIME_DIR%\THIRD-PARTY-NOTICES.txt"
+) else (
+    echo [WARN] THIRD-PARTY-NOTICES.txt not found: "%PROJECT_DIR%\THIRD-PARTY-NOTICES.txt"
 )
 
 if not exist "%TARGET_DIR%\libs" (
@@ -138,7 +161,7 @@ if not exist "%TARGET_DIR%\libs" (
 robocopy "%TARGET_DIR%\libs" "%RUNTIME_DIR%\libs" *.jar /NJH /NJS /NDL /NP /R:1 /W:1 >nul
 if %ERRORLEVEL% GEQ 8 (
     echo [ERROR] Failed to copy dependency jars to "%RUNTIME_DIR%\libs"
-    echo [ERROR] Hint: stop the running server or use hot-build, then retry.
+    echo [ERROR] Hint: stop the running server or use -ai, then retry.
     call :do_pause
     exit /b 1
 )

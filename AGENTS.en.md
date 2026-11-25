@@ -26,7 +26,7 @@
 17. **Config files must be UTF-8 with English-only comments**: `settings.properties` and similar files must be read and written as **UTF-8**, and comments inside them must be **English only** — no Chinese comments. Values that contain Chinese (such as script paths) stay as-is in UTF-8, without escaping.
 18. **The AI must not execute scripts with side effects**: scripts that download, install, delete, unpack, bulk-clean, flash/download firmware, or that modify files, take a long time or require administrator rights **must never be run by the AI**. Hand the complete command to the user to run manually. The AI may only perform read-only checks (network connectivity, path existence, reading file contents), and must never confirm a dialog on the user's behalf or bypass a permission prompt.
 19. **Test scripts through their real entry point**: to verify that a `.bat/.ps1` works, actually run that `.bat/.ps1` the way a user would. **Never run the `.py`** (or any other implementation it calls) directly to bypass the entry point; doing so misses argument parsing, path building and `pause` behaviour.
-20. **`.bat/.ps1` must pause and support `nopause`**: every batch/script must `pause` before exiting (both on success and on failure) so a user who double-clicks it can read the error output. It must also recognise a `nopause` parameter (case-insensitive: `nopause`, `-nopause` or `/nopause`) that skips the pause; the AI passes it to avoid being blocked until timeout.
+20. **`.bat/.ps1` must pause; AI calls pass `-ai`**: every batch/script must `pause` before exiting (both on success and on failure) so a user who double-clicks it can read the error output. AI/MCP tool calls must pass the **`-ai`** argument (scripts recognise at least `ai`, `-ai`, `--ai` and `/ai`, case-insensitively); on receiving it a script adjusts its behaviour as needed — skip `pause`, auto-confirm, use hot build/hot reload, etc. — so automation never blocks and never breaks a running server. The old `nopause`, `autoyes`, `hot-build` and `hot-reload` arguments are removed and must not be used.
 21. **Answer first, do not act**: when the user is only asking, confirming, consulting or discussing, **answer only** — do not change code or files, do not run commands, do not start processes and do not run tests. Act only when the user explicitly asks to change, fix or execute something. If unsure, treat it as a question.
 22. **Follow the user's language**: think and reply in the language the user writes in; default to Simplified Chinese when no language is specified.
 23. **Look before you create**: list the current directory before creating any file or directory (confirm the path, the name and whether it already exists). Never invent paths or directories.
@@ -69,6 +69,7 @@ Append to `C:\Users\<user>\.dsh\profiles\desktop\cordis.patch.yml`:
       config:
         serverName: dlqq-mcp
         transport: stdio
+        cwd: '<deploy dir>\default_workspace'
         command: '<deploy dir>\java\bin\java.exe'
         args:
           - "-Dfile.encoding=UTF-8"
@@ -77,6 +78,8 @@ Append to `C:\Users\<user>\.dsh\profiles\desktop\cordis.patch.yml`:
 ```
 
 Restart DSH after saving. `serverName` is the client-side label (it also prefixes tool names, e.g. `dlqq-mcp` in `mcp__dlqq-mcp__`) and is separate from the `dlqq-mcp-server` name returned by `initialize`; `command` should point at the bundled JDK (`java\bin\java.exe`), or at `java` from PATH with version ≥ 25.
+
+Every stdio example sets `cwd` to `<deploy dir>\default_workspace` so the MCP process starts with that directory as its default workspace; the server logic still defines the default workspace as the process CWD and the code is unchanged. HTTP configs have no child process and need no `cwd`.
 
 ### Other clients
 
@@ -87,6 +90,7 @@ They all use `mcpServers` + `command/args/env` (VS Code is the exception: `serve
   "mcpServers": {
     "dlqq-mcp-server": {
       "command": "java",
+      "cwd": "<deploy dir>\\default_workspace",
       "args": ["-Dfile.encoding=UTF-8", "-jar", "E:\\Code\\AIProject\\dlqq-mcp-server\\.runtime\\dlqq_mcp_server.jar"],
       "env": { "JAVA_TOOL_OPTIONS": "-Dfile.encoding=UTF-8" },
       "timeout": 60000
@@ -145,7 +149,7 @@ Full examples are in the "8) Connect over HTTP (Streamable HTTP)" section of [RE
 |--------|---------|--------|
 | `script\build.bat` | Build only: `mvn clean package -DskipTests` | `target\dlqq_mcp_server.jar` (thin jar) and `target\libs\` |
 | `script\build_and_copy.bat` | Build and sync to `.runtime\` | `.runtime\dlqq_mcp_server.jar`, `.runtime\libs\` |
-| `.runtime\build.bat` | Development build: `[nopause] [hot-build]`; by default deletes old `.runtime\libs` jars first (stop the server), `hot-build` keeps old jars and can run while the server is running | `.runtime\dlqq_mcp_server.jar`, `.runtime\libs\` |
+| `.runtime\build.bat` | Development build: `[-ai]`; without `-ai` it deletes old `.runtime\libs` jars first (stop the server) and pauses at the end; with `-ai` it is non-blocking + hot-build and can run while the server is running | `.runtime\dlqq_mcp_server.jar`, `.runtime\libs\` |
 | `.runtime\make_python_env.bat` | One-click rebuild of the project Python env with bleak / ttkbootstrap / pillow | `.runtime\python\` (about 81 MB) |
 | `.runtime\start-http.bat` | Double-click HTTP launcher (uses `java\`, `libs\` and the sibling JAR; asks for the workspace first) | long-running HTTP service |
 | `.runtime\install_dlqq_mcp_dsh_client.bat` | Auto-install the DSH client plugin `dlqq-mcp-client`: download from Gitee first, fall back to GitHub; install dependencies and register it into the DSH profile (`link:` dependency + bundle + enabled patch entry) | `%USERPROFILE%\.dsh\plugins\dlqq-mcp-client`, updated DSH profile config |
@@ -163,7 +167,7 @@ Full examples are in the "8) Connect over HTTP (Streamable HTTP)" section of [RE
 └── libs\                          # all Maven dependencies
 ```
 
-- When packaging a release, copy the project-root `LICENSE` and `THIRD-PARTY-NOTICES.txt` into the zip root.
+- When packaging a release, copy `LICENSE` into the zip root and copy `THIRD-PARTY-NOTICES.txt` into `.runtime` (next to the JAR; the release layout has no parent directory).
 - Default port is **49129**; if it is in use the console asks for another port, **Enter** retries the default port.
 - If `java\`, `libs\` or `python\` is missing the launcher fails with an explicit "incomplete package" error and never falls back to the system environment.
 - `java\` missing does not fall back to a `java` on `PATH`; `python\` missing disables the BLE tools.
@@ -184,7 +188,8 @@ To change the version, edit `<revision>` in `pom.xml`.
 src/main/java/com/donglouqiaoque/dlqqmcpserver/
 ├── mcp/
 │   ├── MCPServerMain.java          # entry: log dir / UTF-8 init, startup, health check thread
-│   ├── protocol/                   # JsonRpcMessage, McpSchema
+│   ├── AboutTabPanel.java          # Credits tab (author/version/third-party licenses)
+│   ├── MCPServerMain.java          # entry: log dir / UTF-8 init, startup, health check thread
 │   ├── server/McpServer.java       # request dispatch + tool registry + getToolsInfo()
 │   ├── transport/                  # McpTransport, StdioTransport (stdio), HttpTransport (Streamable HTTP)
 │   └── tools/                      # AITools (registry), DeviceTools (peripheral tools) and tool implementations
@@ -193,7 +198,6 @@ src/main/java/com/donglouqiaoque/dlqqmcpserver/
 └── utils/                          # FileUtils, AIRulesUtils, CalculatorUtils
 src/main/resources/
 ├── py/ble_service.py               # headless BLE backend (bleak + stdin/stdout JSON, Java child process)
-├── image/logo.ico                  # window icon (ICO)
 ├── image/logo.png                  # window icon (PNG, used by LogoLoader)
 └── simplelogger.properties
 ```
@@ -211,15 +215,20 @@ On a session's first request the server may initialize that session's workspace 
 missing or `.dlqq`-nested path silently falls back to the default workspace.
 
 Permissions and timeouts: `permission.resource.level` (resource, default **chat, conversation
-mode**) and `permission.operation.level` (operation, default **chat**); the legacy
-`workspace.write.mode` is gone. A new workspace starts as chat and must be escalated through the
-permission tool first; all sessions on the same workspace share one settings file. Permissions can
-only be changed via `dlqq_workspace_permission_set` (downgrade executes directly, escalation shows a
-countdown approval; `set_mcp_properties` rejects permission keys). Workspace switching always
+mode**) and `permission.operation.level` (operation, default **chat**). A new workspace starts as chat
+and must be escalated through the permission tool first; all sessions on the same workspace share one
+settings file. Permissions can only be changed via `dlqq_workspace_permission_set` (downgrade executes
+directly, escalation shows a countdown approval; `dlqq_set_mcp_properties` / `dlqq_reset_mcp_properties`
+reject protected keys (`permission.*`, `script.*`, `tool.policy.*`, `mcp.tools.*`) before approval).
+Workspace switching always
 requires approval, a failed set keeps the current workspace, and the same workspace returns
 immediately. The tool total timeout = approval + execution, default 50 s, overridable with
 `_meta["dlqq/toolTimeoutSeconds"]`; on timeout the approval window closes and execution is
 aborted; `no_wait` background calls are unbounded.
+`dlqq_overwrite_file` is special: a missing target fails before approval with a `dlqq_create_file` hint;
+when the target is at most 1 MiB / 20,000 lines and line-level similarity is >= 90% (changed lines
+<= `max(3, old lines x 10%)`), the tool is downgraded to risky; otherwise it stays high-risk.
+Oversized, undecodable or diff-failed cases always remain high-risk.
 
 Runtime directories (single global location, created on first start): under
 `<jar dir>/.dlqq/` — `workspace_config.json` (path -> hash), `cache/<workspace hash>` (cache; workspace level only, no per-session split), `data/` (shared BLE scripts/icons), `log/{stdio,http}/<startup time>.log` (one file per
@@ -241,14 +250,19 @@ Server console: on startup (with a graphical environment) it **starts hidden in 
 window; **single-click** the tray icon or use the tray menu "Show console" to open it. The menu bar shows the Chinese
 app name "鸫楼桥鹊MCP服务器控制台" (dropdown: hide/exit) with "联系作者：https://www.donglouqiaoque.com" in its
 centre (clickable, opens the default browser) and a Refresh button on its right (small right margin); the
-**tabs `Sessions` / `BLE` / `UART` / `USB` / `WiFi` / `Environment` sit above the table**; peripherals no longer open separate
+**tabs `Sessions` / `BLE` / `UART` / `USB` / `WiFi` / `Environment` / `Credits` sit above the table**; peripherals no longer open separate
 windows — every device is shown and managed inside its tab as a device list + panel (UART by COM port, USB by
 `VID:PID:bus:address`, BLE by MAC, WiFi by interface/SSID).
 The `Environment` tab shows Java (version/vendor/install dir/JAR/heap) and Python (interpreter/version/pip/bleak)
 and provides buttons to open directories, install/update BLE dependencies, and rebuild the Python environment
 (via `.runtime\make_python_env.bat`).
+The `Credits` tab shows the author/contact, version and the build time **in the system time zone**; the license body is
+**read dynamically** from `THIRD-PARTY-NOTICES.txt` (**the JAR directory, i.e. `.runtime`**; the actual path is shown);
+when the file is missing the text area shows the expected path and the open button shows an error dialog; the tab also
+offers buttons to open the deploy directory and the author website.
 The **Refresh button refreshes the currently selected tab**: Sessions refreshes the table; BLE refreshes backend status/device
-lists; UART and USB re-enumerate devices; WiFi refreshes interfaces and connection status; Environment re-detects Java/Python.
+lists; UART and USB re-enumerate devices; WiFi refreshes interfaces and connection status; Environment re-detects Java/Python;
+Credits reloads the license file.
 Individual tabs no longer provide their own refresh buttons.
 native title bar text is cleared. The table is sorted by last activity (descending) and shows active sessions plus
 workspaces recorded in `workspace_config.json` (columns: session key/workspace/source/resource permission/operation
@@ -263,33 +277,37 @@ only "Exit server" terminates the MCP server process.
 
 ## 6. Tool overview
 
-**120** tools in total. Implementations live in `mcp/tools/`; parameters are documented in [README.en.md](README.en.md).
-The 13 project-script tools (build/flash/run/debug) and the 13 script-path setters are **commented out at the source**
-per the permission architecture, and `dlqq_test_hot_reload` is shielded too; the background-program tools use the
-new names (`dlqq_kill_command`, ...).
+**118** tools in total. Implementations live in `mcp/tools/`; parameters are documented in [README.en.md](README.en.md).
+Of the 13 project build/chip/run/debug tools, `dlqq_build_project` is restored (resource RISK, no per-call approval); the
+other 12 stay commented out. Of the 13 script-path setters, `dlqq_set_build_script` is restored (resource HIGH, needs
+approval); the other 12 stay commented out. Of the 5 tool-management tools only `dlqq_mcp_refresh_tools` remains;
+`hide/show/reset/run` are temporarily source-masked. `dlqq_test_hot_reload` is still shielded; the background-program tools
+use the new names (`dlqq_kill_command`, ...).
 
 | Group | Count | Notes |
 |-------|-------|-------|
-| File operations | 19 | read/write/create/overwrite/append, line edits, text replace, copy/move/rename, BOM, binary |
+| File operations | 21 | read/write/create/overwrite/append, line edits, text replace, copy/move/rename, BOM, binary, zip |
 | Directory operations | 8 | mdir, mdirs, tree listing, recursive copy, ... |
 | Search | 4 | files, directories, text in a directory, text in one file |
 | Dialogs | 3 | text input, confirmation, file picker (Swing) |
 | UART | 5 | console tab; addressed by COM name, multiple ports at once, send/receive/log |
-| BLE | 10 | console tab (Java Swing); headless Python bleak backend, addressed by MAC |
+| BLE | 11 | console tab (Java Swing); includes `dlqq_check_bluetooth_open`; headless Python bleak backend, addressed by MAC |
 | USB | 5 | console tab; usb4java, addressed by `VID:PID:bus:address` |
 | WiFi | 5 | console tab; netsh / nmcli, network interface / SSID based |
 | Mouse / keyboard / screen | 14 | `java.awt.Robot` + `dlqq_capture_screen` |
 | Image / Office | 3 | image conversion, Office read and conversion |
 | Time / calculators | 4 | time 1 + calculators 3 |
 | Command execution & background | 18 | 3 command tools + 5 background managers per shell (new `dlqq_kill_*` names) |
-| MCP data/properties | 14 | version info, dynamic tool management (hide/show/refresh/reset/run), workspace, property read/write, cleanup of data/cache/logs |
+| MCP data/properties | 13 | version/property read+write, workspace, cleanup; only `dlqq_mcp_refresh_tools` remains (hide/show/reset/run source-masked) |
+| Project build / script setting | 2 | `dlqq_build_project` (resource RISK, runs directly once configured); `dlqq_set_build_script` (resource HIGH, setting the script needs approval) |
 | Tool list / environment | 2 | `dlqq_get_tool_list`, `dlqq_get_tools_env` |
 
-**Dynamic tool management**: `dlqq_mcp_hide_tools` (hide and persist), `dlqq_mcp_show_tools` (restore specific tools), `dlqq_mcp_refresh_tools` (push `notifications/tools/list_changed` only), `dlqq_mcp_reset_tools` (restore everything and clear the config), `dlqq_mcp_run_tools` (call any registered tool by name). Exclusions are stored in `mcp.tools.excluded` (comma separated) in `<jar dir>/.dlqq/settings/<workspace hash>/settings.properties` and survive a server restart; the management tools are protected. In HTTP mode an immediate refresh requires the client to hold an open SSE connection.
+**Dynamic tool management (refresh only for now)**: `dlqq_mcp_refresh_tools` stays fully accessible and only pushes `notifications/tools/list_changed`; `dlqq_mcp_hide_tools`, `dlqq_mcp_show_tools`, `dlqq_mcp_reset_tools` and `dlqq_mcp_run_tools` are **source-masked**. `mcp.tools.excluded` is still read by the server, but no tool can modify it right now; in HTTP mode a refresh needs an open SSE connection.
 
-**Workspace**: `dlqq_workspace_set` / `dlqq_workspace_get` / `dlqq_workspace_reset` / `dlqq_workspace_permission_set` / `dlqq_get_cwd_path`, plus the `--workspace <dir>` startup argument. The default workspace is the process CWD; when the CWD is unusable or a fallback is needed the server uses `<jar dir>/default_workspace` (the CWD is never a fallback target). **The workspace path is not persisted**. Permissions use two settings: `permission.resource.level` (resource, default chat for a new workspace) and `permission.operation.level` (operation, default chat); the legacy `workspace.write.mode` is gone. All other settings (`script.*`, `response.max.size`, `mcp.tools.excluded`, ...) are persisted in `<jar dir>/.dlqq/settings/<workspace hash>/settings.properties`, and switching the workspace reloads them. Relative paths, script working directories and AI rule bases are resolved against the workspace; cache, data and settings are all workspace-scoped (no per-session split) — cache lives at `<jar dir>/.dlqq/cache/<workspace hash>/` and AI may only read/write content inside that workspace cache directory.
+**Workspace**: `dlqq_workspace_set` / `dlqq_workspace_get` / `dlqq_workspace_reset` / `dlqq_workspace_permission_set` / `dlqq_get_cwd_path`, plus the `--workspace <dir>` startup argument. The default workspace is the process CWD; when the CWD is unusable or a fallback is needed the server uses `<jar dir>/default_workspace` (the CWD is never a fallback target). **The workspace path is not persisted**. Permissions use two settings: `permission.resource.level` (resource, default chat for a new workspace) and `permission.operation.level` (operation, default chat). All other settings (`script.*`, `response.max.size`, `mcp.tools.excluded`, ...) are persisted in `<jar dir>/.dlqq/settings/<workspace hash>/settings.properties`, and switching the workspace reloads them. Relative paths, script working directories and AI rule bases are resolved against the workspace; cache, data and settings are all workspace-scoped (no per-session split) — cache lives at `<jar dir>/.dlqq/cache/<workspace hash>/` and AI may only read/write content inside that workspace cache directory.
 
 **Script tool rules**: `dlqq_build_project` / `dlqq_rebuild_project` / `dlqq_chip_*` / `dlqq_*erase_download` / `dlqq_run_project` / `dlqq_debug_project` and friends have **no built-in default script paths**. When unconfigured they fail with "configure the tool path first" and point at the matching `dlqq_set_*_script`. Settings are written under `script.*` in `<jar dir>/.dlqq/settings/<workspace hash>/settings.properties`.
+A script path can only be set through `dlqq_set_build_script` (**resource HIGH, needs user approval**); `dlqq_set_mcp_properties` / `dlqq_reset_mcp_properties` **reject protected keys before approval** (`script.*`, `permission.*`, `tool.policy.*`, `mcp.tools.*`). Running the configured `dlqq_build_project` is a **resource RISK operation and runs directly inside the workspace, without per-call approval**.
 
 ## 7. AI rule files
 
@@ -332,10 +350,11 @@ Scope: strictly enforced inside the project; outside the project a JFrame asks t
 5. Call `dlqq_get_mcp_version`: in-code time == on-disk time == the new value means loaded; an old in-code value means not loaded;
 6. If tools were added/removed/renamed or schemas changed, restart the client and check the tool list.
 
-### Dynamic tool management (no server restart)
+### Dynamic tool management (refresh only for now)
 
-- `dlqq_mcp_remove_tools` / `dlqq_mcp_refresh_tools` / `dlqq_mcp_reset_tools` / `dlqq_mcp_run_tools`: disable/restore registered tools at runtime, persisted in `mcp.tools.excluded`; while SSE is alive the client refreshes immediately. `run_tools` can call a removed or not-yet-loaded tool by name.
-- Limits: only **registered** tools can be hidden/restored; new code cannot be loaded; the four management tools are protected.
+- Only `dlqq_mcp_refresh_tools` is registered: it pushes `notifications/tools/list_changed` without changing the tool set; in HTTP mode the client must hold an open SSE connection.
+- `dlqq_mcp_hide_tools` / `dlqq_mcp_show_tools` / `dlqq_mcp_reset_tools` / `dlqq_mcp_run_tools` are **source-masked**; hiding/restoring tools and calling tools by name are temporarily unavailable.
+- `mcp.tools.excluded` is still read by the server, but no tool can modify it right now.
 
 ## 9. Known limitations
 

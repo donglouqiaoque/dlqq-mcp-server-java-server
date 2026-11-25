@@ -33,12 +33,11 @@ public final class ToolPolicy {
 
     public enum Risk { SAFE, RISK, HIGH }
 
-    public enum Decision { ALLOW, APPROVE, DENY }
+    public enum Decision { ALLOW, APPROVE, DENY, ERROR }
 
     private static final String RESOURCE_LEVEL_KEY = "permission.resource.level";
     private static final String OPERATION_LEVEL_KEY = "permission.operation.level";
     private static final String LEGACY_OPERATION_LEVEL_KEY = "permission.peripheral.level";
-    private static final String LEGACY_WRITE_MODE_KEY = "workspace.write.mode";
     private static final String CUSTOM_PREFIX = "tool.policy.";
     /** .dlqq 目录拒绝消息（读与写都拒绝，cache 会话目录除外）。 */
     private static final String DLQQ_DENY_MESSAGE =
@@ -103,6 +102,49 @@ public final class ToolPolicy {
                 return dlqq;
             }
         }
+
+        // dlqq_overwrite_file：审批前评估覆盖幅度——
+        // 文件不存在直接报错（提示 create_file）；小文件且相似度 >= 90% 时降级为风险工具；
+        // 文件过大/无法读取/相似度不足时保持高危。
+        if ("dlqq_overwrite_file".equals(toolName)) {
+            OverwriteRiskAssessor.Result assessment = OverwriteRiskAssessor.assess(arguments);
+            if (assessment.decision() == OverwriteRiskAssessor.Decision.ERROR) {
+                return Result.error(assessment.message());
+            }
+            if (assessment.decision() == OverwriteRiskAssessor.Decision.DOWNGRADE) {
+                risk[0] = Risk.RISK;
+            }
+        }
+
+        // 通用属性工具禁止修改/重置权限、脚本、工具管理等受保护属性：直接拒绝，不进入审批。
+        if ("dlqq_set_mcp_properties".equals(toolName)) {
+            Object key = arguments == null ? null : arguments.get("key");
+            Object value = arguments == null ? null : arguments.get("value");
+            String text = key instanceof String valueText ? valueText : "";
+            String newValue = value instanceof String text2 ? text2 : "";
+            if (text.isBlank() || newValue.isEmpty()) {
+                return Result.error("必须同时指定 key 和 value；查询属性请使用 dlqq_get_mcp_properties");
+            }
+            if (isProtectedPropertyKey(text)) {
+                return Result.error("拒绝修改：" + text
+                        + " 属于权限/脚本/工具管理保护属性，不能通过 dlqq_set_mcp_properties 修改");
+            }
+        }
+        if ("dlqq_reset_mcp_properties".equals(toolName)) {
+            Object key = arguments == null ? null : arguments.get("key");
+            Object keys = arguments == null ? null : arguments.get("keys");
+            String text = key instanceof String valueText ? valueText : "";
+            boolean hasKey = !text.isBlank();
+            boolean hasKeys = keys instanceof List<?> list && !list.isEmpty();
+            if (hasKey && hasKeys) {
+                return Result.error("不能同时指定 key 和 keys，请二选一");
+            }
+            if (hasKey && isProtectedPropertyKey(text)) {
+                return Result.error("拒绝重置：" + text
+                        + " 属于权限/脚本/工具管理保护属性");
+            }
+        }
+
         boolean inside = isInsideWorkspace(arguments);
 
         // 只在工具确实使用对应能力时才判断该维度权限：
@@ -128,6 +170,20 @@ public final class ToolPolicy {
     /** 工具是否默认隐藏（源码屏蔽类工具）。 */
     public static boolean isHiddenByDefault(String toolName) {
         return Boolean.TRUE.equals(HIDDEN.get(toolName));
+    }
+
+    /**
+     * 属性是否属于权限/脚本/工具管理等受保护配置。
+     * 这类配置只能通过专用安全工具修改，不允许通过通用属性工具设置或重置。
+     */
+    public static boolean isProtectedPropertyKey(String key) {
+        if (key == null || key.isBlank()) {
+            return false;
+        }
+        return key.startsWith("permission.")
+                || key.startsWith("script.")
+                || key.startsWith("tool.policy.")
+                || key.startsWith("mcp.tools.");
     }
 
     /** 工具风险摘要（用于审批窗口展示）。 */
@@ -287,7 +343,7 @@ public final class ToolPolicy {
         return Result.allow();
     }
 
-    /** 资源权限等级：默认“工作区外需要审批”（approval），旧键 workspace.write.mode 已废弃。 */
+    /** 资源权限等级：默认“工作区外需要审批”（approval）。 */
     private static String resourceLevel() {
         String level = level(RESOURCE_LEVEL_KEY, null);
         return level == null ? "approval" : level;
@@ -434,6 +490,11 @@ public final class ToolPolicy {
 
         private static Result deny(String message) {
             return new Result(Decision.DENY, message);
+        }
+
+        /** 预检失败：直接返回工具错误（不弹审批，也不带“权限拒绝”前缀）。 */
+        private static Result error(String message) {
+            return new Result(Decision.ERROR, message);
         }
 
         public Decision decision() {

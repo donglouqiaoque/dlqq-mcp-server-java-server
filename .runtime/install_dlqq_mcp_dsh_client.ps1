@@ -4,7 +4,8 @@
 # All console output is English/ASCII only.
 
 param(
-    [string]$ProfileDir = ""
+    [string]$ProfileDir = "",
+    [switch]$Ai
 )
 
 $ErrorActionPreference = "Stop"
