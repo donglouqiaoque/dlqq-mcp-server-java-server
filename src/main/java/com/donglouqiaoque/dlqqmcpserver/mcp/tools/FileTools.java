@@ -4,6 +4,9 @@ import com.donglouqiaoque.dlqqmcpserver.utils.AIRulesUtils;
 import com.donglouqiaoque.dlqqmcpserver.utils.FileAccessGuard;
 import com.donglouqiaoque.dlqqmcpserver.utils.FileUtils;
 import com.donglouqiaoque.dlqqmcpserver.utils.Workspace;
+import com.github.difflib.DiffUtils;
+import com.github.difflib.patch.AbstractDelta;
+import com.github.difflib.patch.Patch;
 import javax.swing.*;
 import java.awt.BorderLayout;
 import java.awt.FlowLayout;
@@ -1015,8 +1018,9 @@ public class FileTools {
         // 直接写入内容（覆盖原有内容），根据记录的 BOM 状态决定是否写入 BOM
         writeFileWithBomControl(path, content, cs, filePath);
 
-        // 计算新文件行数
-        int newLineCount = content.split("\r?\n", -1).length;
+        // 计算新文件行数（与 Files.readAllLines 保持一致：末尾换行不额外算一行）
+        List<String> newLines = splitContentIntoLines(content);
+        int newLineCount = newLines.size();
 
         // 生成覆盖报告（带+/-差异）
         StringBuilder report = new StringBuilder();
@@ -1052,9 +1056,8 @@ public class FileTools {
         }
 
         // 显示新内容（新增）
-        String[] newLines = content.split("\r?\n", -1);
-        for (int i = 0; i < newLines.length; i++) {
-            report.append(String.format("+ %4d | %s\n", i + 1, newLines[i]));
+        for (int i = 0; i < newLines.size(); i++) {
+            report.append(String.format("+ %4d | %s\n", i + 1, newLines.get(i)));
         }
 
         report.append(footerInfo);
@@ -1104,10 +1107,8 @@ public class FileTools {
 
         // 读取原文件末尾内容（用于显示上下文）
         List<String> oldLines = new ArrayList<>();
-        int oldLineCount = 0;
         if (Files.exists(path)) {
             oldLines = Files.readAllLines(path, cs);
-            oldLineCount = oldLines.size();
         }
 
         // 确保父目录存在
@@ -1124,45 +1125,87 @@ public class FileTools {
             writeFileWithBomControlAppend(path, content, cs, filePath);
         }
 
-        // 生成追加报告
-        return generateAppendReport(filePath, content, oldLines, oldLineCount, cs);
+        // 生成追加报告：读取追加后的实际文件行，确保行号和行数与最终文件一致
+        List<String> finalLines = Files.readAllLines(path, cs);
+        return generateAppendReport(filePath, oldLines, finalLines);
     }
 
     /**
-     * 生成文件追加报告 - 带+/-差异
+     * 生成文件追加报告 - 以实际追加后的行列表为准，避免 CRLF、结尾换行或
+     * 原文件末尾无换行时出现行数/行号错误。
      */
-    private static String generateAppendReport(String filePath, String content, List<String> oldLines, int oldLineCount, Charset cs) throws IOException {
+    private static String generateAppendReport(String filePath, List<String> oldLines, List<String> newLines) {
         StringBuilder report = new StringBuilder();
 
-        // 计算追加内容的行数
-        List<String> newContentLines = Arrays.asList(content.split("\n", -1));
-        if (newContentLines.size() == 1 && content.contains("\r\n")) {
-            newContentLines = Arrays.asList(content.split("\r\n", -1));
-        }
-
-        int newTotalLines = oldLineCount + newContentLines.size();
+        int oldLineCount = oldLines.size();
+        int newTotalLines = newLines.size();
+        int addedLines = newTotalLines - oldLineCount;
 
         StringBuilder headerInfo = new StringBuilder();
         headerInfo.append("追加内容到文件：").append(filePath).append("\n");
-        headerInfo.append("新增 ").append(newContentLines.size()).append(" 行 (+").append(newContentLines.size()).append(" 行)\n");
+        if (oldLineCount == 0) {
+            headerInfo.append("新增 ").append(newTotalLines).append(" 行 (+").append(newTotalLines).append(" 行)\n");
+        } else if (addedLines > 0) {
+            headerInfo.append("新增 ").append(addedLines).append(" 行 (+").append(addedLines).append(" 行)\n");
+        } else {
+            headerInfo.append("追加内容与第 ").append(oldLineCount).append(" 行合并，行数不变\n");
+        }
         headerInfo.append("原文件行数：").append(oldLineCount).append(" 行 → 新文件行数：").append(newTotalLines).append(" 行\n\n");
 
         String footerInfo = "\n【状态】✓ 内容追加成功\n";
-
         report.append(headerInfo);
 
-        // 显示上文（最后5行）- 保持不变
-        if (oldLineCount > 0) {
-            int displayStart = Math.max(1, oldLineCount - 4);
-            for (int i = displayStart - 1; i < oldLineCount; i++) {
+        Patch<String> patch;
+        try {
+            patch = DiffUtils.diff(oldLines, newLines);
+        } catch (Exception e) {
+            report.append("  （无法生成差异视图: ").append(e.getMessage()).append("）\n");
+            report.append(footerInfo);
+            return report.toString();
+        }
+
+        List<AbstractDelta<String>> deltas = patch.getDeltas();
+        int maxModifications = 20;
+        int shown = 0;
+        for (AbstractDelta<String> delta : deltas) {
+            if (shown >= maxModifications) {
+                break;
+            }
+            int oldStart = delta.getSource().getPosition();
+            int newStart = delta.getTarget().getPosition();
+            List<String> deletedLines = delta.getSource().getLines();
+            List<String> insertedLines = delta.getTarget().getLines();
+
+            // 上文（旧文件行号）
+            for (int i = Math.max(0, oldStart - 3); i < oldStart; i++) {
                 report.append(String.format("  %4d | %s\n", i + 1, oldLines.get(i)));
+            }
+
+            // 被覆盖/合并掉的旧行
+            for (int i = 0; i < deletedLines.size(); i++) {
+                report.append(String.format("- %4d | %s\n", oldStart + i + 1, deletedLines.get(i)));
+            }
+
+            // 实际新增/合并后的行
+            for (int i = 0; i < insertedLines.size(); i++) {
+                report.append(String.format("+ %4d | %s\n", newStart + i + 1, insertedLines.get(i)));
+            }
+
+            // 下文（新文件行号）
+            int afterNewStart = newStart + insertedLines.size();
+            int afterNewEnd = Math.min(newLines.size(), afterNewStart + 3);
+            for (int i = afterNewStart; i < afterNewEnd; i++) {
+                report.append(String.format("  %4d | %s\n", i + 1, newLines.get(i)));
+            }
+
+            shown++;
+            if (shown < deltas.size() && shown < maxModifications) {
+                report.append("\n");
             }
         }
 
-        // 显示追加内容（+）
-        for (int i = 0; i < newContentLines.size(); i++) {
-            int lineNum = oldLineCount + i + 1;
-            report.append(String.format("+ %4d | %s\n", lineNum, newContentLines.get(i)));
+        if (deltas.size() > maxModifications) {
+            report.append("\n  ... (还有 ").append(deltas.size() - maxModifications).append(" 处修改未显示) ...\n");
         }
 
         report.append(footerInfo);
@@ -2030,7 +2073,6 @@ public class FileTools {
         String content = Files.readString(path, cs);
         String newContent;
         int replaceCount = 0;
-        List<int[]> matchPositions = new ArrayList<>(); // 记录匹配位置 [start, end]
 
         if (useRegex) {
             try {
@@ -2038,14 +2080,13 @@ public class FileTools {
                 Pattern pattern = Pattern.compile(searchText);
                 Matcher matcher = pattern.matcher(content);
 
-                // 单次遍历：检查匹配、记录位置、执行替换
+                // 单次遍历：检查匹配并执行替换
                 StringBuffer sb = new StringBuffer(content.length());
                 while (matcher.find()) {
                     replaceCount++;
                     if (replaceCount > MAX_REGEX_MATCHES) {
                         return "【拒绝修改】匹配次数过多（超过" + MAX_REGEX_MATCHES + "次），可能存在灾难性回溯风险。请优化正则表达式或缩小修改范围。";
                     }
-                    matchPositions.add(new int[]{matcher.start(), matcher.end()});
                     matcher.appendReplacement(sb, Matcher.quoteReplacement(replaceText));
                 }
 
@@ -2065,11 +2106,10 @@ public class FileTools {
                 return "【未替换】未找到文本: " + searchText;
             }
 
-            // 记录匹配位置
+            // 统计匹配次数
             int index = 0;
             while ((index = content.indexOf(searchText, index)) != -1) {
                 replaceCount++;
-                matchPositions.add(new int[]{index, index + searchText.length()});
                 index += searchText.length();
             }
 
@@ -2090,7 +2130,7 @@ public class FileTools {
         }
 
         // 生成对比报告
-        return generateTextReplaceReport(lines, content, newContent, searchText, replaceText, useRegex, replaceCount, matchPositions);
+        return generateTextReplaceReport(lines, newContent, searchText, replaceText, useRegex, replaceCount);
     }
 
     /**
@@ -2111,115 +2151,31 @@ public class FileTools {
     }
 
     /**
-     * 计算修改位置对应的行号（优化算法 O(n+m)）
-     * 使用前缀和数组，避免对每个匹配位置都遍历所有行
+     * 将内容按行拆分，行为与 Files.readAllLines 保持一致：
+     * 支持 \n、\r\n、\r，并只去掉末尾换行产生的最后一个空元素。
      */
-    private static List<Integer> computeModifiedLines(List<String> lines, List<int[]> matchPositions) {
-        if (matchPositions.isEmpty()) {
+    public static List<String> splitContentIntoLines(String content) {
+        if (content == null || content.isEmpty()) {
             return new ArrayList<>();
         }
-
-        // 构建行起始位置的前缀和数组
-        int[] lineStartPos = new int[lines.size()];
-        int pos = 0;
-        for (int i = 0; i < lines.size(); i++) {
-            lineStartPos[i] = pos;
-            pos += lines.get(i).length() + 1; // +1 for newline
+        List<String> lines = new ArrayList<>(Arrays.asList(content.split("\\R", -1)));
+        if (!lines.isEmpty() && lines.get(lines.size() - 1).isEmpty()) {
+            lines.remove(lines.size() - 1);
         }
-
-        // 对每个匹配位置，使用二分查找确定行号
-        List<Integer> result = new ArrayList<>();
-        Set<Integer> uniqueLines = new HashSet<>();
-
-        for (int[] match : matchPositions) {
-            int matchStart = match[0];
-            int lineNum = findLineNumber(lineStartPos, matchStart);
-            if (!uniqueLines.contains(lineNum)) {
-                uniqueLines.add(lineNum);
-                result.add(lineNum);
-            }
-        }
-
-        return result;
+        return lines;
     }
 
     /**
-     * 二分查找：根据字符位置确定行号（1-based）
+     * 生成文本替换对比报告：直接对旧/新行列表做行级 diff，
+     * 不再使用字符偏移或“均匀差异”近似行号。
+     *
+     * <p>这样可以避免 CRLF 文件行号偏移，以及把未修改行显示成相同的 -/+ 内容。</p>
      */
-    private static int findLineNumber(int[] lineStartPos, int targetPos) {
-        int left = 0;
-        int right = lineStartPos.length - 1;
-
-        while (left < right) {
-            int mid = (left + right + 1) / 2;
-            if (lineStartPos[mid] <= targetPos) {
-                left = mid;
-            } else {
-                right = mid - 1;
-            }
-        }
-
-        return left + 1; // 1-based line number
-    }
-
-    /**
-     * 计算新旧文件的行号映射
-     * 对于每个旧文件的修改行号，计算其在新文件中对应的行号
-     * 基于累计行数差异进行映射
-     */
-    private static int[] computeLineMapping(List<String> oldLines, List<String> newLines, List<Integer> modifiedOldLines) {
-        int[] mapping = new int[modifiedOldLines.size()];
-        int oldSize = oldLines.size();
-        int newSize = newLines.size();
-        int totalDiff = newSize - oldSize;
-
-        // 计算每个修改位置的累计差异
-        // 假设差异均匀分布
-        for (int i = 0; i < modifiedOldLines.size(); i++) {
-            int oldLine = modifiedOldLines.get(i);
-
-            if (oldSize == 0) {
-                mapping[i] = i + 1;
-                continue;
-            }
-
-            // 计算到当前行为止的预期差异
-            // 使用更简单的线性映射
-            double progress = (double) oldLine / oldSize;
-            int expectedDiff = (int) Math.round(totalDiff * progress);
-
-            // 新文件行号 = 旧文件行号 + 累计差异
-            int newLine = oldLine + expectedDiff;
-
-            // 确保在有效范围内
-            newLine = Math.max(1, Math.min(newLine, newSize));
-            mapping[i] = newLine;
-        }
-
-        return mapping;
-    }
-
-    /**
-     * 生成文本替换对比报告 - 使用diff风格（带颜色）
-     */
-    private static String generateTextReplaceReport(List<String> oldLines, String oldContent, String newContent,
-                                                     String searchText, String replaceText, boolean useRegex,
-                                                     int replaceCount, List<int[]> matchPositions) {
+    private static String generateTextReplaceReport(List<String> oldLines, String newContent,
+                                                     String searchText, String replaceText,
+                                                     boolean useRegex, int replaceCount) {
         StringBuilder report = new StringBuilder();
-
-        // 分割新内容为行列表
-        List<String> newLines = Arrays.asList(newContent.split("\n", -1));
-        if (newLines.size() == 1 && newContent.contains("\r\n")) {
-            newLines = Arrays.asList(newContent.split("\r\n", -1));
-        }
-        // 修复行数统计：去掉末尾空元素（与 Files.readAllLines 的行为保持一致），
-        // 否则以换行结尾的文件会多算一行，导致"原文件行数 → 新文件行数"显示异常
-        while (!newLines.isEmpty() && newLines.get(newLines.size() - 1).isEmpty()) {
-            newLines = new ArrayList<>(newLines.subList(0, newLines.size() - 1));
-        }
-
-        // 计算每处修改的行号（优化算法：O(n+m) 替代 O(n*m)）
-        List<Integer> modifiedLineNumbers = computeModifiedLines(oldLines, matchPositions);
+        List<String> newLines = splitContentIntoLines(newContent);
 
         // 判断是否为删除操作（replaceText为空）
         boolean isDeleteOperation = (replaceText == null || replaceText.isEmpty());
@@ -2258,69 +2214,58 @@ public class FileTools {
 
         report.append(headerInfo);
 
-        // 为每处修改生成diff
+        Patch<String> patch;
+        try {
+            patch = DiffUtils.diff(oldLines, newLines);
+        } catch (Exception e) {
+            report.append("  （无法生成差异视图: ").append(e.getMessage()).append("）\n");
+            report.append(footerInfo);
+            return report.toString();
+        }
+
+        List<AbstractDelta<String>> deltas = patch.getDeltas();
         int maxModifications = 20; // 最多显示20处修改，避免报告过长
-        // 预计算新旧文件行号映射（基于累计行数差异）
-        int[] lineMapping = computeLineMapping(oldLines, newLines, modifiedLineNumbers);
+        int shown = 0;
+        for (AbstractDelta<String> delta : deltas) {
+            if (shown >= maxModifications) {
+                break;
+            }
+            int oldStart = delta.getSource().getPosition();
+            int newStart = delta.getTarget().getPosition();
+            List<String> deletedLines = delta.getSource().getLines();
+            List<String> insertedLines = delta.getTarget().getLines();
 
-        for (int i = 0; i < modifiedLineNumbers.size() && i < maxModifications; i++) {
-            int modLine = modifiedLineNumbers.get(i);
-            int displayStart = Math.max(1, modLine - 3);
-            int displayOldEnd = Math.min(oldLines.size(), modLine + 3);
-
-            // 上文（从旧文件获取）
-            for (int lineNum = displayStart; lineNum < modLine && lineNum <= oldLines.size(); lineNum++) {
-                report.append(String.format("  %4d | %s\n", lineNum, oldLines.get(lineNum - 1)));
+            // 上文（旧文件行号）
+            for (int i = Math.max(0, oldStart - 3); i < oldStart; i++) {
+                report.append(String.format("  %4d | %s\n", i + 1, oldLines.get(i)));
             }
 
-            // 修改行：原行（-）
-            if (modLine <= oldLines.size()) {
-                report.append(String.format("- %4d | %s\n", modLine, oldLines.get(modLine - 1)));
+            // 被删除/替换的旧行
+            for (int i = 0; i < deletedLines.size(); i++) {
+                report.append(String.format("- %4d | %s\n", oldStart + i + 1, deletedLines.get(i)));
             }
 
-            // 新行（+）- 使用预计算的映射行号
-            if (!isDeleteOperation) {
-                int newLineNum = lineMapping[i];
-                int newLinesToShow = 1; // 默认显示1行新内容
-
-                // 如果新文件行数多于旧文件，尝试显示多行
-                if (totalDiff > 0 && i < modifiedLineNumbers.size() - 1) {
-                    int nextNewLine = lineMapping[i + 1];
-                    newLinesToShow = Math.max(1, nextNewLine - newLineNum);
-                }
-
-                for (int j = 0; j < newLinesToShow && (newLineNum - 1 + j) < newLines.size(); j++) {
-                    int currentNewLine = newLineNum + j;
-                    report.append(String.format("+ %4d | %s\n", currentNewLine, newLines.get(currentNewLine - 1)));
-                }
+            // 新增/替换后的新行
+            for (int i = 0; i < insertedLines.size(); i++) {
+                report.append(String.format("+ %4d | %s\n", newStart + i + 1, insertedLines.get(i)));
             }
 
-            // 下文（删除操作从新文件获取，替换操作从旧文件获取）
-            if (isDeleteOperation) {
-                // 删除操作：下文从新文件获取，使用映射行号
-                int newLineNum = lineMapping[i];
-                int linesAfter = Math.min(3, newLines.size() - (newLineNum - 1));
-                for (int j = 0; j < linesAfter; j++) {
-                    int currentNewLine = newLineNum + j;
-                    if ((currentNewLine - 1) < newLines.size()) {
-                        report.append(String.format("  %4d | %s\n", currentNewLine, newLines.get(currentNewLine - 1)));
-                    }
-                }
-            } else {
-                // 替换操作：下文从旧文件获取
-                for (int lineNum = modLine + 1; lineNum <= displayOldEnd && lineNum <= oldLines.size(); lineNum++) {
-                    report.append(String.format("  %4d | %s\n", lineNum, oldLines.get(lineNum - 1)));
-                }
+            // 下文（新文件行号，避免行数变化后仍显示旧行号）
+            int afterNewStart = newStart + insertedLines.size();
+            int afterNewEnd = Math.min(newLines.size(), afterNewStart + 3);
+            for (int i = afterNewStart; i < afterNewEnd; i++) {
+                report.append(String.format("  %4d | %s\n", i + 1, newLines.get(i)));
             }
 
-            if (i < modifiedLineNumbers.size() - 1 && i < maxModifications - 1) {
+            shown++;
+            if (shown < deltas.size() && shown < maxModifications) {
                 report.append("\n");
             }
         }
-        
+
         // 如果有更多修改，显示省略信息
-        if (modifiedLineNumbers.size() > maxModifications) {
-            report.append("\n  ... (还有 ").append(modifiedLineNumbers.size() - maxModifications).append(" 处修改未显示) ...\n");
+        if (deltas.size() > maxModifications) {
+            report.append("\n  ... (还有 ").append(deltas.size() - maxModifications).append(" 处修改未显示) ...\n");
         }
 
         report.append(footerInfo);

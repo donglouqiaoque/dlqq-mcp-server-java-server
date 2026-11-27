@@ -35,6 +35,9 @@ public class McpServer {
 
     private static final Logger logger = LoggerFactory.getLogger(McpServer.class);
 
+    /** 当前进程的活动服务端实例（控制台修改工具可见性后推送 tools/list 变更）。 */
+    private static volatile McpServer activeServer;
+
     private final String serverName;
     private final String serverVersion;
     private final McpTransport transport;
@@ -76,6 +79,7 @@ public class McpServer {
         this.resourceHandlers = new ConcurrentHashMap<>();
         this.promptHandlers = new ConcurrentHashMap<>();
         this.capabilities = new Capabilities();
+        activeServer = this;
 
         // 注册默认的处理程序
         registerDefaultHandlers();
@@ -90,6 +94,14 @@ public class McpServer {
         boolean sent = transport.notifyToolsListChanged();
         logger.info("[McpServer] Sent notifications/tools/list_changed, result={}", sent);
         return sent;
+    }
+
+    /** 控制台修改工具可见性后，通知所有已连接的客户端重新拉取 tools/list。 */
+    public static void notifyActiveToolsChanged() {
+        McpServer server = activeServer;
+        if (server != null) {
+            server.notifyToolsListChanged();
+        }
     }
 
     /**
@@ -139,7 +151,13 @@ public class McpServer {
      * 当前启用（对客户端可见）的工具数量。
      */
     public int getEnabledToolCount() {
-        return toolHandlers.size() - disabledTools.size();
+        int count = 0;
+        for (String name : toolHandlers.keySet()) {
+            if (!disabledTools.contains(name) && ToolPolicy.isVisible(name)) {
+                count++;
+            }
+        }
+        return count;
     }
 
     /**
@@ -495,7 +513,7 @@ public class McpServer {
         logger.info("[McpServer.handleToolsList] Building tool list, handler count: {}", toolHandlers.size());
 
         for (Map.Entry<String, ToolHandler> entry : toolHandlers.entrySet()) {
-            if (disabledTools.contains(entry.getKey())) {
+            if (disabledTools.contains(entry.getKey()) || !ToolPolicy.isVisible(entry.getKey())) {
                 continue;
             }
             ToolHandler handler = entry.getValue();
@@ -584,6 +602,16 @@ public class McpServer {
         if (disabledTools.contains(toolName)) {
             sendErrorResponse(request.getId(), JsonRpcMessage.ERROR_INVALID_PARAMS,
                     "工具已被移除: " + toolName + "（可用 dlqq_mcp_reset_tools 恢复）");
+            return;
+        }
+        if (!ToolPolicy.isVisible(toolName)) {
+            sendErrorResponse(request.getId(), JsonRpcMessage.ERROR_INVALID_PARAMS,
+                    "工具已被隐藏（在工具管理中设置为“已被隐藏”）: " + toolName);
+            return;
+        }
+        if (!ToolPolicy.isCallable(toolName)) {
+            sendErrorResponse(request.getId(), JsonRpcMessage.ERROR_INVALID_PARAMS,
+                    "工具仅可查看，禁止调用（在工具管理中设置为“仅可查看”）: " + toolName);
             return;
         }
 
@@ -904,7 +932,7 @@ public class McpServer {
         String keyword = (filter == null || filter.trim().isEmpty()) ? null : filter.trim().toLowerCase();
         int count = 0;
         for (String name : names) {
-            if (disabledTools.contains(name)) {
+            if (disabledTools.contains(name) || !ToolPolicy.isVisible(name)) {
                 continue;
             }
             if (keyword != null && !name.toLowerCase().contains(keyword)) {

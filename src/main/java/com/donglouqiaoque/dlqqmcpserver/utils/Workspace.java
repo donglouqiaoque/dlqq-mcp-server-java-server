@@ -6,7 +6,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 工作区根目录与权限管理（会话级）。
@@ -413,6 +415,51 @@ public final class Workspace {
     /** 读取当前工作区配置值；文件或键不存在时返回 null。 */
     public static String getSettingValue(String key) {
         return readSettingsValue(getSettingsFile(), key);
+    }
+
+    /**
+     * 读取指定工作区的全部配置项（控制台配置选项卡使用）。
+     *
+     * @param root 工作区根目录
+     * @return 键值对；文件不存在或读取失败时返回空 Map
+     */
+    public static Map<String, String> readAllSettingsFor(Path root) {
+        Map<String, String> values = new LinkedHashMap<>();
+        if (root == null) {
+            return values;
+        }
+        Path file = settingsFileOf(root);
+        if (!Files.isRegularFile(file)) {
+            return values;
+        }
+        try {
+            for (String line : Files.readAllLines(file, StandardCharsets.UTF_8)) {
+                String trimmed = line.trim();
+                if (trimmed.isEmpty() || trimmed.startsWith("#")) {
+                    continue;
+                }
+                int equalIndex = trimmed.indexOf('=');
+                if (equalIndex > 0) {
+                    values.put(trimmed.substring(0, equalIndex).trim(),
+                            trimmed.substring(equalIndex + 1).trim());
+                }
+            }
+        } catch (IOException ignored) {
+            // 读取失败时返回已读取部分（通常为空）
+        }
+        return values;
+    }
+
+    /**
+     * 写入指定工作区的配置项（控制台配置选项卡使用）。
+     *
+     * @param root  工作区根目录
+     * @param key   配置键
+     * @param value 配置值
+     * @throws IOException 写入失败
+     */
+    public static void writeSettingFor(Path root, String key, String value) throws IOException {
+        writeSettingsValue(settingsFileOf(root), key, value);
     }
 
     /**

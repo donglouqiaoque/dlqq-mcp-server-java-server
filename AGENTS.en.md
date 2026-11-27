@@ -189,7 +189,9 @@ src/main/java/com/donglouqiaoque/dlqqmcpserver/
 ├── mcp/
 │   ├── MCPServerMain.java          # entry: log dir / UTF-8 init, startup, health check thread
 │   ├── AboutTabPanel.java          # Credits tab (author/version/third-party licenses)
-│   ├── MCPServerMain.java          # entry: log dir / UTF-8 init, startup, health check thread
+│   ├── ConfigTabPanel.java         # Config tab (manage a session workspace's settings.properties)
+│   ├── ToolCatalog.java            # Source-masked tool catalog for the Tool Management tab
+│   ├── ToolManagementTabPanel.java # Tool Management tab (risk levels / visibility states)
 │   ├── server/McpServer.java       # request dispatch + tool registry + getToolsInfo()
 │   ├── transport/                  # McpTransport, StdioTransport (stdio), HttpTransport (Streamable HTTP)
 │   └── tools/                      # AITools (registry), DeviceTools (peripheral tools) and tool implementations
@@ -250,9 +252,20 @@ Server console: on startup (with a graphical environment) it **starts hidden in 
 window; **single-click** the tray icon or use the tray menu "Show console" to open it. The menu bar shows the Chinese
 app name "鸫楼桥鹊MCP服务器控制台" (dropdown: hide/exit) with "联系作者：https://www.donglouqiaoque.com" in its
 centre (clickable, opens the default browser) and a Refresh button on its right (small right margin); the
-**tabs `Sessions` / `BLE` / `UART` / `USB` / `WiFi` / `Environment` / `Credits` sit above the table**; peripherals no longer open separate
+**tabs `Sessions` / `Config` / `Tool Management` / `BLE` / `UART` / `USB` / `WiFi` / `Environment` / `Credits` sit above the table**; peripherals no longer open separate
 windows — every device is shown and managed inside its tab as a device list + panel (UART by COM port, USB by
 `VID:PID:bus:address`, BLE by MAC, WiFi by interface/SSID).
+The `Config` tab selects a session or workspace (active sessions plus workspaces registered in `workspace_config.json`
+without an active session; sessions sharing one workspace share the same `settings.properties`) and lists every
+configuration property with its current and default value; double-click the "Current value" cell to save, and use
+"Restore default" for the selected row; the "Restore all" button to its right is always available and restores every configurable
+property of the current workspace to its default (with confirmation); switching a session or workspace reloads that workspace's configuration file.
+The `Tool Management` tab uses the same session/workspace selection and shows **all tools, including source-masked tools**,
+with resource risk, peripheral risk and current visibility. Defaults come from `resources/tool_policy.txt`; changes are
+written only to `tool_policy.txt` in that workspace's settings directory (next to `settings.properties`). Registered tools
+support the four documented states (full access / view-only / hidden) and source-masked tools stay at "source-masked";
+risk levels are editable for every tool. The "Restore all" button to the right of "Restore default" is always available and
+clears all tool-policy overrides for the current workspace (with confirmation). Hiding/restoring tools notifies clients with `notifications/tools/list_changed`.
 The `Environment` tab shows Java (version/vendor/install dir/JAR/heap) and Python (interpreter/version/pip/bleak)
 and provides buttons to open directories, install/update BLE dependencies, and rebuild the Python environment
 (via `.runtime\make_python_env.bat`).
@@ -260,9 +273,9 @@ The `Credits` tab shows the author/contact, version and the build time **in the 
 **read dynamically** from `THIRD-PARTY-NOTICES.txt` (**the JAR directory, i.e. `.runtime`**; the actual path is shown);
 when the file is missing the text area shows the expected path and the open button shows an error dialog; the tab also
 offers buttons to open the deploy directory and the author website.
-The **Refresh button refreshes the currently selected tab**: Sessions refreshes the table; BLE refreshes backend status/device
-lists; UART and USB re-enumerate devices; WiFi refreshes interfaces and connection status; Environment re-detects Java/Python;
-Credits reloads the license file.
+The **Refresh button refreshes the currently selected tab**: Sessions refreshes the table; Config reloads the property list;
+Tool Management reloads the tool policy; BLE refreshes backend status/device lists; UART and USB re-enumerate devices;
+WiFi refreshes interfaces and connection status; Environment re-detects Java/Python; Credits reloads the license file.
 Individual tabs no longer provide their own refresh buttons.
 native title bar text is cleared. The table is sorted by last activity (descending) and shows active sessions plus
 workspaces recorded in `workspace_config.json` (columns: session key/workspace/source/resource permission/operation

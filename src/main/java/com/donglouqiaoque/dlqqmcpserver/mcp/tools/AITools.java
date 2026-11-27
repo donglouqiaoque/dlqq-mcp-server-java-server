@@ -598,7 +598,8 @@ public class AITools {
                         List<String> all = Files.readAllLines(Workspace.resolve(filePath), cs);
                         int from = Math.max(1, startLine);
                         int to = endLine == -1 ? all.size() : Math.min(all.size(), endLine);
-                        String[] newLines = content.split("\n", -1);
+                        // 与实际执行逻辑保持一致：按 \\r?\\n 拆分，不保留末尾空行
+                        String[] newLines = content.split("\\r?\\n");
                         StringBuilder sb = new StringBuilder();
                         sb.append("【预览 dry_run】未写入任何内容\n");
                         sb.append("===================\n\n");
@@ -617,8 +618,13 @@ public class AITools {
                         for (int i = 0; i < newLines.length; i++) {
                             sb.append("+   ").append(from + i).append(" | ").append(newLines[i]).append('\n');
                         }
+                        // 替换后行数可能变化，下文使用新文件行号，内容仍取自未受影响的旧行
+                        int delta = newLines.length - (to - from + 1);
                         for (int i = to + 1; i <= ctxTo; i++) {
-                            sb.append("    ").append(i).append(" | ").append(all.get(i - 1)).append('\n');
+                            int newLineNum = i + delta;
+                            if (newLineNum >= 1) {
+                                sb.append("    ").append(newLineNum).append(" | ").append(all.get(i - 1)).append('\n');
+                            }
                         }
                         return textResult(sb.toString());
                     } catch (Exception e) {

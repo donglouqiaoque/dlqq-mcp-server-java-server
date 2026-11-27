@@ -1786,6 +1786,15 @@ public class McpTools {
     }};
 
     /**
+     * 获取默认配置值副本（控制台配置选项卡使用）。
+     *
+     * @return 默认配置键值对副本
+     */
+    public static Map<String, String> getDefaultProperties() {
+        return new LinkedHashMap<>(DEFAULT_PROPERTIES);
+    }
+
+    /**
      * 重置配置属性为默认值。
      *
      * @param requestedKeys null 表示重置全部非保护属性；空集合表示没有可重置项；

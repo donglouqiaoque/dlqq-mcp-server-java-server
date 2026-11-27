@@ -257,12 +257,23 @@ public final class ServerConsoleWindow {
 
         tabs = new JTabbedPane();
         tabs.addTab("会话管理", sessionsPanel);
+        ConfigTabPanel configTab = new ConfigTabPanel();
+        tabs.addTab("配置", configTab);
+        ToolManagementTabPanel toolTab = new ToolManagementTabPanel();
+        tabs.addTab("工具管理", toolTab);
         tabs.addTab("BLE", new BleTabPanel());
         tabs.addTab("UART", new UartTabPanel());
         tabs.addTab("USB", new UsbTabPanel());
         tabs.addTab("WiFi", new WifiTabPanel());
         tabs.addTab("环境", new EnvTabPanel());
         tabs.addTab("版权鸣谢", new AboutTabPanel());
+        tabs.addChangeListener(event -> {
+            if (tabs.getSelectedComponent() == configTab) {
+                configTab.refresh();
+            } else if (tabs.getSelectedComponent() == toolTab) {
+                toolTab.refresh();
+            }
+        });
         frame.add(tabs, BorderLayout.CENTER);
 
         frame.addWindowListener(new WindowAdapter() {

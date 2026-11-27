@@ -4,15 +4,19 @@ import com.donglouqiaoque.dlqqmcpserver.utils.SessionScope;
 import com.donglouqiaoque.dlqqmcpserver.utils.Workspace;
 
 import java.io.BufferedReader;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 工具权限策略。
@@ -32,6 +36,30 @@ import java.util.Set;
 public final class ToolPolicy {
 
     public enum Risk { SAFE, RISK, HIGH }
+
+    /**
+     * 工具可见程度（与 README 的四种隐藏状态一致）。
+     *
+     * <ul>
+     *   <li>{@code FULL}：完全访问，tools/list 可见且可调用；</li>
+     *   <li>{@code VIEW_ONLY}：仅可查看，tools/list 可见但调用被拒绝；</li>
+     *   <li>{@code HIDDEN}：已被隐藏，tools/list 不返回且调用被拒绝；</li>
+     *   <li>{@code SOURCE_MASKED}：源码屏蔽，不注册，只有修改源码才能调用。</li>
+     * </ul>
+     */
+    public enum Visibility {
+        FULL, VIEW_ONLY, HIDDEN, SOURCE_MASKED;
+
+        /** 是否出现在 tools/list 中。 */
+        public boolean listed() {
+            return this == FULL || this == VIEW_ONLY;
+        }
+
+        /** 是否允许调用。 */
+        public boolean callable() {
+            return this == FULL;
+        }
+    }
 
     public enum Decision { ALLOW, APPROVE, DENY, ERROR }
 
@@ -63,7 +91,29 @@ public final class ToolPolicy {
             "dlqq_clear_pwsh_list");
 
     private static final Map<String, Risk[]> RISKS = new HashMap<>();
-    private static final Map<String, Boolean> HIDDEN = new HashMap<>();
+    private static final Map<String, Visibility> VISIBILITY = new HashMap<>();
+
+    /** 每个工作区 settings 目录下的工具策略覆盖文件名（与 settings.properties 同级）。 */
+    public static final String POLICY_FILE_NAME = "tool_policy.txt";
+
+    /** 工作区覆盖策略缓存：文件变化（mtime/size）后自动重新读取。 */
+    private static final Map<String, CachedPolicy> POLICY_CACHE = new ConcurrentHashMap<>();
+
+    /** 单个工具的有效策略。 */
+    public record PolicyEntry(Risk resourceRisk, Risk peripheralRisk, Visibility visibility) {
+
+        /** 兼容旧布尔构造：true=已被隐藏，false=完全访问。 */
+        public PolicyEntry(Risk resourceRisk, Risk peripheralRisk, boolean hidden) {
+            this(resourceRisk, peripheralRisk, hidden ? Visibility.HIDDEN : Visibility.FULL);
+        }
+
+        public boolean hidden() {
+            return visibility == Visibility.HIDDEN || visibility == Visibility.SOURCE_MASKED;
+        }
+    }
+
+    private record CachedPolicy(long modifiedMillis, long size, Map<String, PolicyEntry> entries) {
+    }
 
     static {
         loadResource();
@@ -94,7 +144,8 @@ public final class ToolPolicy {
                 return Result.approve("自定义权限要求用户批准后执行该工具");
             }
         }
-        Risk[] risk = RISKS.getOrDefault(toolName, new Risk[] {Risk.SAFE, Risk.SAFE});
+        PolicyEntry effectivePolicy = policyFor(toolName);
+        Risk[] risk = new Risk[] {effectivePolicy.resourceRisk(), effectivePolicy.peripheralRisk()};
         // .dlqq 目录（配置/日志/缓存/数据）对 AI 一律封闭；仅当前会话缓存目录内的内容允许读写
         if (!MANAGEMENT_TOOLS.contains(toolName)) {
             Result dlqq = decideDlqqAccess(arguments);
@@ -167,9 +218,188 @@ public final class ToolPolicy {
         return Result.allow();
     }
 
-    /** 工具是否默认隐藏（源码屏蔽类工具）。 */
+    /** 工具是否默认隐藏（内置 tool_policy.txt 的 defaultHidden 状态）。 */
     public static boolean isHiddenByDefault(String toolName) {
-        return Boolean.TRUE.equals(HIDDEN.get(toolName));
+        Visibility visibility = VISIBILITY.getOrDefault(toolName, Visibility.FULL);
+        return visibility == Visibility.HIDDEN || visibility == Visibility.SOURCE_MASKED;
+    }
+
+    /**
+     * 当前工作区的有效工具策略：内置默认值 + 工作区 tool_policy.txt 覆盖值。
+     *
+     * @param toolName 工具名
+     * @return 有效策略；未配置的工具按 S/S/完全访问 处理
+     */
+    public static PolicyEntry policyFor(String toolName) {
+        if (toolName == null || toolName.isBlank()) {
+            return new PolicyEntry(Risk.SAFE, Risk.SAFE, Visibility.FULL);
+        }
+        PolicyEntry override = workspaceOverrides().get(toolName);
+        return override != null ? override : defaultPolicyFor(toolName);
+    }
+
+    /** 当前工作区中该工具是否出现在 tools/list（完全访问或仅可查看）。 */
+    public static boolean isVisible(String toolName) {
+        return policyFor(toolName).visibility().listed();
+    }
+
+    /** 当前工作区中该工具是否允许调用（只有完全访问允许）。 */
+    public static boolean isCallable(String toolName) {
+        return policyFor(toolName).visibility().callable();
+    }
+
+    /** 内置默认策略全集（控制台工具管理页使用）。 */
+    public static Map<String, PolicyEntry> defaultPolicy() {
+        Map<String, PolicyEntry> entries = new LinkedHashMap<>();
+        for (String name : RISKS.keySet()) {
+            entries.put(name, defaultPolicyFor(name));
+        }
+        return entries;
+    }
+
+    /** 指定工作区的策略覆盖文件路径：settings/<hash>/tool_policy.txt。 */
+    public static Path policyFileFor(Path workspace) {
+        if (workspace == null) {
+            return null;
+        }
+        Path settingsFile = Workspace.settingsFileOf(workspace);
+        Path directory = settingsFile.getParent();
+        return directory == null ? null : directory.resolve(POLICY_FILE_NAME);
+    }
+
+    /** 读取指定工作区的策略覆盖项（只包含覆盖文件中的行）。 */
+    public static Map<String, PolicyEntry> readPolicyOverrides(Path workspace) {
+        return parsePolicyFile(policyFileFor(workspace));
+    }
+
+    /** 写入指定工作区的策略覆盖项（只写修改过的工具）。 */
+    public static void writePolicyOverrides(Path workspace, Map<String, PolicyEntry> overrides) throws IOException {
+        Path file = policyFileFor(workspace);
+        if (file == null) {
+            throw new IOException("无法确定工作区工具策略文件");
+        }
+        Path directory = file.getParent();
+        if (directory != null) {
+            Files.createDirectories(directory);
+        }
+        Map<String, PolicyEntry> safeOverrides = overrides == null ? Map.of() : overrides;
+        List<String> names = new ArrayList<>(safeOverrides.keySet());
+        names.sort(String::compareTo);
+        try (var writer = Files.newBufferedWriter(file, StandardCharsets.UTF_8)) {
+            writer.write("# Tool policy overrides: name|resourceRisk|peripheralRisk|visibility\n");
+            writer.write("# risk: S=safe R=risk H=high ; visibility: 0=full, 1=hidden, 2=view-only, 3=source-masked\n");
+            for (String name : names) {
+                PolicyEntry entry = safeOverrides.get(name);
+                if (entry == null) {
+                    continue;
+                }
+                writer.write(name + "|" + riskCode(entry.resourceRisk()) + "|"
+                        + riskCode(entry.peripheralRisk()) + "|" + visibilityCode(entry.visibility()) + "\n");
+            }
+        }
+        POLICY_CACHE.remove(file.toString());
+    }
+
+    private static PolicyEntry defaultPolicyFor(String toolName) {
+        Risk[] risk = RISKS.get(toolName);
+        Visibility visibility = VISIBILITY.getOrDefault(toolName, Visibility.FULL);
+        if (risk == null) {
+            return new PolicyEntry(Risk.SAFE, Risk.SAFE, visibility);
+        }
+        return new PolicyEntry(risk[0], risk[1], visibility);
+    }
+
+    private static Map<String, PolicyEntry> workspaceOverrides() {
+        Path file = currentPolicyFile();
+        if (file == null) {
+            return Map.of();
+        }
+        String cacheKey = file.toString();
+        try {
+            if (!Files.isRegularFile(file)) {
+                POLICY_CACHE.remove(cacheKey);
+                return Map.of();
+            }
+            long modified = Files.getLastModifiedTime(file).toMillis();
+            long size = Files.size(file);
+            CachedPolicy cached = POLICY_CACHE.get(cacheKey);
+            if (cached != null && cached.modifiedMillis() == modified && cached.size() == size) {
+                return cached.entries();
+            }
+            Map<String, PolicyEntry> entries = parsePolicyFile(file);
+            POLICY_CACHE.put(cacheKey, new CachedPolicy(modified, size, entries));
+            return entries;
+        } catch (IOException | RuntimeException e) {
+            return Map.of();
+        }
+    }
+
+    private static Path currentPolicyFile() {
+        try {
+            Path settingsFile = Workspace.getSettingsFile();
+            Path directory = settingsFile.getParent();
+            return directory == null ? null : directory.resolve(POLICY_FILE_NAME);
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    private static Map<String, PolicyEntry> parsePolicyFile(Path file) {
+        Map<String, PolicyEntry> entries = new LinkedHashMap<>();
+        if (file == null || !Files.isRegularFile(file)) {
+            return entries;
+        }
+        try (BufferedReader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                String text = line.trim();
+                if (text.isEmpty() || text.startsWith("#")) {
+                    continue;
+                }
+                String[] parts = text.split("\\|");
+                if (parts.length < 4) {
+                    continue;
+                }
+                String name = parts[0].trim();
+                if (name.isEmpty()) {
+                    continue;
+                }
+                entries.put(name, new PolicyEntry(parseRisk(parts[1]), parseRisk(parts[2]),
+                        parseVisibility(parts[3])));
+            }
+        } catch (IOException ignored) {
+            // 读取失败时按无覆盖处理
+        }
+        return entries;
+    }
+
+    private static String riskCode(Risk risk) {
+        if (risk == Risk.HIGH) {
+            return "H";
+        }
+        return risk == Risk.RISK ? "R" : "S";
+    }
+
+    private static String visibilityCode(Visibility visibility) {
+        if (visibility == Visibility.HIDDEN) {
+            return "1";
+        }
+        if (visibility == Visibility.VIEW_ONLY) {
+            return "2";
+        }
+        if (visibility == Visibility.SOURCE_MASKED) {
+            return "3";
+        }
+        return "0";
+    }
+
+    private static Visibility parseVisibility(String text) {
+        return switch (text == null ? "" : text.trim()) {
+            case "0" -> Visibility.FULL;
+            case "2" -> Visibility.VIEW_ONLY;
+            case "3" -> Visibility.SOURCE_MASKED;
+            default -> Visibility.HIDDEN;
+        };
     }
 
     /**
@@ -186,10 +416,10 @@ public final class ToolPolicy {
                 || key.startsWith("mcp.tools.");
     }
 
-    /** 工具风险摘要（用于审批窗口展示）。 */
+    /** 工具风险摘要（用于审批窗口展示，按当前工作区覆盖值计算）。 */
     public static String riskSummary(String toolName) {
-        Risk[] risk = RISKS.getOrDefault(toolName, new Risk[] {Risk.SAFE, Risk.SAFE});
-        return "资源风险：" + riskLabel(risk[0]) + "；操作风险：" + riskLabel(risk[1]);
+        PolicyEntry entry = policyFor(toolName);
+        return "资源风险：" + riskLabel(entry.resourceRisk()) + "；操作风险：" + riskLabel(entry.peripheralRisk());
     }
 
     /** 参数中的路径是否位于当前工作区内。 */
@@ -446,12 +676,11 @@ public final class ToolPolicy {
                     if (parts.length < 4) {
                         continue;
                     }
+                    String name = parts[0].trim();
                     Risk resourceRisk = parseRisk(parts[1]);
                     Risk peripheralRisk = parseRisk(parts[2]);
-                    RISKS.put(parts[0].trim(), new Risk[] {resourceRisk, peripheralRisk});
-                    if ("1".equals(parts[3].trim())) {
-                        HIDDEN.put(parts[0].trim(), true);
-                    }
+                    RISKS.put(name, new Risk[] {resourceRisk, peripheralRisk});
+                    VISIBILITY.put(name, parseVisibility(parts[3]));
                 }
             }
         } catch (Exception ignored) {

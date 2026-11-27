@@ -416,18 +416,28 @@ All runtime data lives in **one directory next to the jar**; no `.dlqq` is creat
 When a graphical environment is available, the console **starts hidden in the system tray** (no window pops up);
 **single-click** the tray icon or use the tray menu "Show console" to open it:
 
-- Tabs below the menu bar: **Sessions / BLE / UART / USB / WiFi / Environment / Credits**; peripherals no longer open separate
-  windows — each device is managed in its tab as a device list + panel. The **Environment** tab shows Java
+- Tabs below the menu bar: **Sessions / Config / Tool Management / BLE / UART / USB / WiFi / Environment / Credits**; peripherals no longer open separate
+  windows — each device is managed in its tab as a device list + panel. The **Config** tab selects a session or workspace
+  (active sessions plus workspaces registered in `workspace_config.json` without an active session; sessions sharing one workspace share the same `settings.properties`)
+  and lists every configuration property with its current and default value; double-click the "Current value" cell to save,
+  and use "Restore default" for the selected row; the "Restore all" button to its right is always available and restores every
+  configurable property of the current workspace to its default (with confirmation); switching a session or workspace reloads that workspace's configuration file.
+  The **Tool Management** tab follows the same session/workspace selection and shows **all tools, including source-masked tools**,
+  with their resource risk, peripheral risk and current visibility. Defaults come from `resources/tool_policy.txt`; changes are
+  written only to `tool_policy.txt` in that workspace's settings directory (next to `settings.properties`). Risk levels are editable
+  for every tool; visibility is editable for registered tools (full access / view-only / hidden), while source-masked tools stay at
+  "source-masked" and only their risk levels can be changed. The "Restore all" button to the right of "Restore default" is always
+  available and clears all tool-policy overrides for the current workspace (with confirmation). Hiding/restoring tools notifies clients with `notifications/tools/list_changed`.
+  The **Environment** tab shows Java
   (version/vendor/install dir/JAR/heap) and Python (interpreter/version/pip/bleak) and offers buttons to open
   directories, install/update BLE dependencies, and rebuild the Python environment (via `.runtime\make_python_env.bat`);
-  the **Credits** tab shows the author/contact, version and build time **in the system time zone**; the license body is read
   the **Credits** tab shows the author/contact, version and build time **in the system time zone**; the license body is read
   dynamically from `THIRD-PARTY-NOTICES.txt` (**the JAR directory, i.e. `.runtime`**, actual path shown); when missing, the
   text area shows the expected path and the open button shows an error; it also offers buttons to open the deploy
   directory and the author website;
 - The menu bar centre shows "联系作者：https://www.donglouqiaoque.com" (click to open the default browser); the
   "Refresh" button is on its right with a small right margin; **the Refresh button refreshes the currently selected tab**:
-  Sessions refreshes the table, BLE refreshes backend status/device lists, UART/USB re-enumerate devices, WiFi refreshes
+  Sessions refreshes the table, Config reloads the property list, Tool Management reloads the tool policy, BLE refreshes backend status/device lists, UART/USB re-enumerate devices, WiFi refreshes
   interfaces/connection status, and Environment re-detects Java/Python info; Credits reloads the license file; tabs no longer have their own refresh buttons;
 - The native title bar text is cleared (no window title is shown); the session/workspace table is shown on the "Sessions" tab;
 - The table is sorted by **last activity (descending)** and shows two kinds of rows: active sessions, plus workspaces recorded in

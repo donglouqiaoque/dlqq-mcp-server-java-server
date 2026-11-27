@@ -1,5 +1,6 @@
-# Tool policy table: name|resourceRisk|peripheralRisk|defaultHidden
-# risk: S=safe R=risk H=high ; hidden: 1=hidden by default, 0=visible
+# Tool policy table: name|resourceRisk|peripheralRisk|visibility
+# risk: S=safe R=risk H=high
+# visibility: 0=full access, 1=hidden, 2=view-only, 3=source-masked
 dlqq_read_file|S|S|0
 dlqq_read_bin_file|S|S|0
 dlqq_create_file|R|S|0
@@ -108,11 +109,11 @@ dlqq_get_mcp_version|S|S|0
 dlqq_get_mcp_properties|S|S|0
 dlqq_set_mcp_properties|H|S|0
 dlqq_reset_mcp_properties|H|S|0
-dlqq_mcp_hide_tools|H|S|0
-dlqq_mcp_show_tools|H|S|0
-dlqq_mcp_reset_tools|H|S|0
+dlqq_mcp_hide_tools|H|S|3
+dlqq_mcp_show_tools|H|S|3
+dlqq_mcp_reset_tools|H|S|3
 dlqq_mcp_refresh_tools|S|S|0
-dlqq_mcp_run_tools|H|S|0
+dlqq_mcp_run_tools|H|S|3
 dlqq_clear_mcp_cache|R|S|0
 dlqq_clear_mcp_data|H|S|0
 dlqq_clear_mcp_log|R|S|0
@@ -123,3 +124,34 @@ dlqq_workspace_get|S|S|0
 dlqq_workspace_reset|H|S|0
 dlqq_workspace_permission_set|H|S|0
 dlqq_get_cwd_path|S|S|0
+
+# Source-masked project build/chip/run/debug tools (kept in the policy catalog for tool management)
+dlqq_rebuild_project|R|S|3
+dlqq_chip_erase|H|S|3
+dlqq_chip_download|H|S|3
+dlqq_erase_download|H|S|3
+dlqq_build_erase_download|H|S|3
+dlqq_rebuild_erase_download|H|S|3
+dlqq_run_project|R|S|3
+dlqq_debug_project|R|S|3
+dlqq_build_run_project|R|S|3
+dlqq_build_debug_project|R|S|3
+dlqq_rebuild_run_project|R|S|3
+dlqq_rebuild_debug_project|R|S|3
+
+# Source-masked script-path setters
+dlqq_set_rebuild_script|H|S|3
+dlqq_set_chip_erase_script|H|S|3
+dlqq_set_chip_download_script|H|S|3
+dlqq_set_erase_download_script|H|S|3
+dlqq_set_build_erase_download_script|H|S|3
+dlqq_set_rebuild_erase_download_script|H|S|3
+dlqq_set_run_script|H|S|3
+dlqq_set_debug_script|H|S|3
+dlqq_set_build_run_script|H|S|3
+dlqq_set_build_debug_script|H|S|3
+dlqq_set_rebuild_run_script|H|S|3
+dlqq_set_rebuild_debug_script|H|S|3
+
+# Source-masked hot-reload test tool
+dlqq_test_hot_reload|S|S|3
